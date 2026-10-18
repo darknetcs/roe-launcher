@@ -25,7 +25,7 @@ jobs:
         run: |
           mkdir -p dist/roe-launcher
           cp target/release/roe-launcher dist/roe-launcher/
-          cp packaging/roe-launcher.desktop README.md NOTICE.md crates/roe-launcher/assets/fonts/gemina2.txt dist/roe-launcher/
+          cp packaging/roe-launcher.desktop README.md LICENSE NOTICE.md crates/roe-launcher/assets/fonts/gemina2.txt dist/roe-launcher/
           tar -C dist -czf roe-launcher-linux-x86_64.tar.gz roe-launcher
           sha256sum roe-launcher-linux-x86_64.tar.gz > roe-launcher-linux-x86_64.tar.gz.sha256
       - uses: actions/upload-artifact@v4
