@@ -1,0 +1,7 @@
+/target
+*.log
+.tools/
+/dist
+# local working notes for Claude Code
+CLAUDE.md
+.claude/

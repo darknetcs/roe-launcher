@@ -1,0 +1,20 @@
+[package]
+name = "roe-launcher"
+version = "0.1.0"
+edition = "2021"
+description = "GUI launcher for Ring of Elysium and its local server (Linux)"
+
+[[bin]]
+name = "roe-launcher"
+path = "src/main.rs"
+
+[dependencies]
+roe-core = { path = "../roe-core" }
+eframe = { version = "0.31", default-features = true }
+rfd = "0.15"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+anyhow = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+raw-window-handle = "0.6"

@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = ["crates/roe-core", "crates/roe-launcher"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+codegen-units = 4

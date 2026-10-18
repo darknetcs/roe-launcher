@@ -1,0 +1,85 @@
+# Linux: built on an OLD glibc (Ubuntu 22.04, glibc 2.35) so the binary runs on every mainstream
+# distro released since (Debian 12, Ubuntu 22.04+, Fedora, Arch, SteamOS ...).
+# Windows x64: cross-built with MinGW on the same runner (the build that was tested under Proton),
+# after the core tests passed on a real Windows runner.
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+# attaching the packages to the GitHub release needs write access to the repository contents
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test the core
+        run: cargo test -p roe-core
+      - name: Build
+        run: cargo build --release -p roe-launcher
+      - name: Package
+        run: |
+          mkdir -p dist/roe-launcher
+          cp target/release/roe-launcher dist/roe-launcher/
+          cp packaging/roe-launcher.desktop README.md NOTICE.md crates/roe-launcher/assets/fonts/gemina2.txt dist/roe-launcher/
+          tar -C dist -czf roe-launcher-linux-x86_64.tar.gz roe-launcher
+          sha256sum roe-launcher-linux-x86_64.tar.gz > roe-launcher-linux-x86_64.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: roe-launcher-linux-x86_64
+          path: |
+            roe-launcher-linux-x86_64.tar.gz
+            roe-launcher-linux-x86_64.tar.gz.sha256
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            roe-launcher-linux-x86_64.tar.gz
+            roe-launcher-linux-x86_64.tar.gz.sha256
+
+  windows-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test the core on Windows
+        run: cargo test -p roe-core
+
+  windows:
+    needs: windows-test
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - uses: Swatinem/rust-cache@v2
+      - name: Install MinGW
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Build
+        run: cargo build --release -p roe-launcher --target x86_64-pc-windows-gnu
+      - name: Package
+        run: |
+          mkdir -p dist/roe-launcher
+          cp target/x86_64-pc-windows-gnu/release/roe-launcher.exe README.md LICENSE NOTICE.md crates/roe-launcher/assets/fonts/gemina2.txt dist/roe-launcher/
+          (cd dist && zip -r ../roe-launcher-windows-x86_64.zip roe-launcher)
+          sha256sum roe-launcher-windows-x86_64.zip > roe-launcher-windows-x86_64.zip.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: roe-launcher-windows-x86_64
+          path: |
+            roe-launcher-windows-x86_64.zip
+            roe-launcher-windows-x86_64.zip.sha256
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            roe-launcher-windows-x86_64.zip
+            roe-launcher-windows-x86_64.zip.sha256

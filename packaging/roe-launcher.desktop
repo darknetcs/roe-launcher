@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Ring of Elysium (Local Launcher)
+Comment=Launch Ring of Elysium together with its local server
+Exec=roe-launcher
+Icon=roe-launcher
+Terminal=false
+Categories=Game;
+StartupWMClass=roe-launcher
