@@ -54,10 +54,11 @@ pub const MAPS: [Map; 4] = [
         name: "Desert",
         world: "EU_Desert_4096",
         id: Some(16021),
-        support: Support::Experimental,
-        badge: "Untested",
-        note: "Not tried yet. The server only has Dione's spawn points, loot, zones and evacuation, and Desert is a \
-               smaller map, so expect odd spawns, missing loot or no way to extract.",
+        support: Support::Broken,
+        badge: "Falls through the ground",
+        note: "Loads, but the landing-point picker doesn't respond; at the start you appear high above the map and \
+               fall through the ground without end, and the server then refuses a new match until it restarts. The \
+               server only knows Dione's terrain (Desert is lower and smaller).",
     },
     Map {
         name: "Dione at night",
@@ -95,9 +96,9 @@ mod tests {
         assert_eq!(playable_id(DIONE), DIONE);
         assert_eq!(playable_id(16007), 16007);
         assert_eq!(by_id(16007).unwrap().support, Support::Experimental);
-        assert_eq!(playable_id(16021), 16021);
-        // night hangs the game: a saved choice falls back to Dione
+        // night hangs the game and desert drops you through the ground: a saved choice falls back to Dione
         assert_eq!(playable_id(16011), DIONE);
+        assert_eq!(playable_id(16021), DIONE);
         // the dev test map, or anything else, falls back to Dione
         assert_eq!(playable_id(16005), DIONE);
         assert_eq!(playable_id(0), DIONE);
