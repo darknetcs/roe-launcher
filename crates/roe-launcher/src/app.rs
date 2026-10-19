@@ -181,6 +181,8 @@ pub struct App {
     /// Discord Rich Presence worker (only while switched on) and its last connection status.
     presence: Option<Presence>,
     pub presence_status: Arc<Mutex<String>>,
+    /// MOCK: the map picked on Server Settings. Not saved and not sent to the server yet.
+    pub mock_map: u32,
     last_presence: Instant,
     /// "Install with Steam": how Steam was asked (or why it could not be), and since when we wait.
     pub steam_install: Option<Result<String, String>>,
@@ -255,6 +257,7 @@ impl App {
             custom_bgs: backgrounds::list(&backgrounds::dir()),
             presence: None,
             presence_status: Arc::new(Mutex::new(String::new())),
+            mock_map: 16010,
             last_presence: Instant::now() - Duration::from_secs(10),
             steam_install: None,
             install_wait: None,
