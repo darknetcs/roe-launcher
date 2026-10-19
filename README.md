@@ -16,6 +16,7 @@ Unofficial fan tooling. It contains no game files: you bring your own copy of th
 | **Game location** | Found automatically through Steam's `libraryfolders.vdf` and the app manifest (native and Flatpak Steam, every library). You can always browse or paste a path, or drop the exe. The `Europa_Client.exe` hash is checked against the supported 2022 build. |
 | **Proton** | Reads Steam's compatibility tools: GE-Proton, Proton-CachyOS, Proton-EM, UMU-Proton, Valve's Proton, anything with a `proton` script. Choose a fixed version, *"always the newest GE-Proton / CachyOS / …"*, or any custom folder. |
 | **Updates** | Keeps its own copy of the server files and updates it from GitHub (exact-commit download, keeps the Python/.NET environment and run logs). Optionally re-applies the bundled **English translation** after every update. |
+| **Launcher updates** | Checks this project's GitHub releases at start. *Update now* downloads the package for your system, installs it only if it matches the release's SHA-256 file, and replaces the launcher in place; *Restart now* opens the new version (not while the game or server is running). The launcher's folder must be writable; otherwise download the release by hand. |
 | **Look** | Ring of Elysium styling by default (Obsidian theme, orange accent, logo and wordmark). Four bundled backgrounds or your own images, darkening, panel opacity, UI scale, optional weather (falling snow or a sandstorm), more presets. |
 
 ## Quick start
@@ -98,4 +99,4 @@ those files (keep the names) or adjust `src/assets.rs`.
 * **Doctor page**: one-click diagnostics (Python/venv, .NET, GL, portal, prefix, ports, hash) with a copyable report.
 * Tray icon, restart-on-crash, desktop notifications.
 * LAN/SSH remote-peer mode (the server already supports it).
-* Launcher self-update, AppImage/Flatpak packaging, Steam Deck friendly layout.
+* AppImage/Flatpak packaging, Steam Deck friendly layout.

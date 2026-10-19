@@ -257,7 +257,7 @@ impl App {
                     ui.add(egui::Image::new((self.logo.id(), vec2(w, w * assets::LOGO_ASPECT))));
                 });
                 ui.add_space(14.0);
-                let upd = self.update_available();
+                let upd = self.update_available() || self.launcher_update_available();
                 let items = [
                     (Page::Play, "Play Locally".to_string()),
                     (Page::ServerBrowser, "Server Browser".to_string()),
@@ -807,12 +807,15 @@ impl App {
     // ---------- Updates ----------
     fn page_updates(&mut self, ui: &mut Ui, pal: &Palette) {
         self.page_title(ui, pal, "Updates");
-        muted(ui, pal, "The launcher keeps its own copy of ROE-LIVE/ring-of-elysium-local and updates it from GitHub.");
+        muted(ui, pal, "Updates for the launcher itself, and for its own copy of ROE-LIVE/ring-of-elysium-local.");
         ui.add_space(8.0);
         let op = self.cfg.theme.panel_opacity;
+        card(ui, pal, op, |ui| self.launcher_update_card(ui, pal));
+        ui.add_space(10.0);
         let mut check = false;
         let mut upd = false;
         card(ui, pal, op, |ui| {
+            ui.label(RichText::new("Server files").strong());
             egui::Grid::new("upd").num_columns(2).spacing([18.0, 8.0]).show(ui, |ui| {
                 ui.label("Installed");
                 match &self.info {
@@ -860,7 +863,8 @@ impl App {
         });
         ui.add_space(10.0);
         card(ui, pal, op, |ui| {
-            ui.checkbox(&mut self.cfg.check_updates_on_start, "Check for updates when the launcher starts");
+            ui.checkbox(&mut self.cfg.check_launcher_updates, "Check for a new launcher version when it starts");
+            ui.checkbox(&mut self.cfg.check_updates_on_start, "Check for server file updates when the launcher starts");
             ui.checkbox(&mut self.cfg.translate_after_update, "Translate comments and messages to English after each update");
             let n = self.report.as_ref().map(|r| r.untranslated).or(self.info.as_ref().and_then(|i| i.untranslated));
             if let Some(n) = n {
@@ -874,6 +878,69 @@ impl App {
         }
         if upd {
             self.do_update();
+        }
+    }
+
+    fn launcher_update_card(&mut self, ui: &mut Ui, pal: &Palette) {
+        use roe_core::selfupdate;
+        ui.label(RichText::new("Launcher").strong());
+        let (mut check, mut install, mut restart) = (false, false, false);
+        egui::Grid::new("launcher-upd").num_columns(2).spacing([18.0, 8.0]).show(ui, |ui| {
+            ui.label("Installed");
+            ui.label(format!("v{}", selfupdate::CURRENT));
+            ui.end_row();
+            ui.label("On GitHub");
+            match &self.launcher_release {
+                Some(Ok(r)) => ui.hyperlink_to(&r.tag, r.page()),
+                Some(Err(e)) => ui.colored_label(pal.warn, short(e, 80)),
+                None => ui.label(if self.launcher_checking { "checking…" } else { "—" }),
+            };
+            ui.end_row();
+        });
+        ui.add_space(6.0);
+        let blocked = self.launcher_blocked.clone();
+        if let Some(tag) = &self.launcher_installed {
+            status_line(ui, pal.good, format!("Launcher {tag} is installed: restart to use it"));
+        } else if self.launcher_update_available() {
+            status_line(ui, pal.warn, "A new launcher version is available");
+        } else if matches!(self.launcher_release, Some(Ok(_))) {
+            status_line(ui, pal.good, "You have the latest launcher");
+        }
+        let in_use = self.client_running() || self.server_running();
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!self.launcher_checking, egui::Button::new("Check now")).clicked() {
+                check = true;
+            }
+            if self.launcher_installed.is_some() {
+                let r = ui.add_enabled(!in_use, egui::Button::new("Restart now").fill(pal.accent.gamma_multiply(0.5)));
+                if r.on_disabled_hover_text("Close the game and stop the server first").clicked() {
+                    restart = true;
+                }
+            } else if self.launcher_update_available() {
+                let can = !self.launcher_updating && blocked.is_none();
+                if ui.add_enabled(can, egui::Button::new("Update now").fill(pal.accent.gamma_multiply(0.5))).clicked() {
+                    install = true;
+                }
+            }
+            if self.launcher_updating {
+                ui.spinner();
+            }
+            ui.hyperlink_to("Release notes", selfupdate::RELEASES_PAGE);
+        });
+        if let (Some(why), true) = (&blocked, self.launcher_update_available()) {
+            ui.colored_label(pal.warn, format!("Cannot update here: {why}."));
+        }
+        if let Some(e) = &self.launcher_error {
+            ui.colored_label(pal.bad, e);
+        }
+        if check {
+            self.check_launcher();
+        }
+        if install {
+            self.update_launcher();
+        }
+        if restart {
+            self.restart_launcher();
         }
     }
 

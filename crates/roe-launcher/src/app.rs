@@ -9,6 +9,7 @@ use roe_core::server::{self, Ports};
 use roe_core::servers::{self, ServerEntry, ServerSource};
 use roe_core::update::{self, InstallInfo, Remote};
 use roe_core::options::{self, ServerOption};
+use roe_core::selfupdate::{self, Release};
 use roe_core::{client, lan, runtime, steam, translate, Sink};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -62,6 +63,10 @@ pub enum Event {
     Thumbs(Vec<(Background, Option<egui::ColorImage>)>),
     /// The match options of the installed windows_launch.py.
     Schema(Result<Vec<ServerOption>, String>),
+    /// The newest launcher release on GitHub.
+    LauncherRelease(Result<Release, String>),
+    /// A launcher update was installed (its tag) or failed.
+    LauncherInstalled(Result<String, String>),
 }
 
 /// The add / edit dialog of the Server Browser.
@@ -134,6 +139,18 @@ pub struct App {
     pub schema: Option<Result<Vec<ServerOption>, String>>,
     schema_loading: bool,
 
+    // the launcher's own updates
+    pub launcher_release: Option<Result<Release, String>>,
+    pub launcher_checking: bool,
+    pub launcher_updating: bool,
+    /// Tag of a newer launcher that is installed and waits for a restart.
+    pub launcher_installed: Option<String>,
+    pub launcher_error: Option<String>,
+    /// Why this launcher cannot replace itself (checked once at start).
+    pub launcher_blocked: Option<String>,
+    /// This launcher's file, taken at start (an update replaces the file under the running program).
+    exe: Option<PathBuf>,
+
     // logs
     pub logs: VecDeque<(Src, String)>,
     pub log_show: [bool; 3],
@@ -197,6 +214,13 @@ impl App {
             report: None,
             schema: None,
             schema_loading: false,
+            launcher_release: None,
+            launcher_checking: false,
+            launcher_updating: false,
+            launcher_installed: None,
+            launcher_error: None,
+            launcher_blocked: selfupdate::current_exe().and_then(|e| selfupdate::unsupported_reason(&e)),
+            exe: selfupdate::current_exe(),
             logs: VecDeque::new(),
             log_show: [true; 3],
             log_file: open_log_file(),
@@ -229,6 +253,12 @@ impl App {
         app.load_schema();
         if app.cfg.check_updates_on_start {
             app.check_updates();
+        }
+        if let Some(exe) = &app.exe {
+            selfupdate::cleanup(exe);
+        }
+        if app.cfg.check_launcher_updates {
+            app.check_launcher();
         }
         app.log(Src::Launcher, "Launcher started.".into());
         if app.wine {
@@ -318,6 +348,25 @@ impl App {
                         let e = self.explain_server_error(e);
                         self.log(Src::Launcher, format!("Error: {e}"));
                         self.flow_error = Some(e);
+                    }
+                }
+                Event::LauncherRelease(r) => {
+                    self.launcher_checking = false;
+                    match &r {
+                        Ok(rel) if rel.is_newer_than(selfupdate::CURRENT) => self.log(Src::Launcher, format!("Launcher {} is available (this is v{}).", rel.tag, selfupdate::CURRENT)),
+                        Ok(_) => {}
+                        Err(e) => self.log(Src::Launcher, format!("Launcher update check failed: {e}")),
+                    }
+                    self.launcher_release = Some(r);
+                }
+                Event::LauncherInstalled(r) => {
+                    self.launcher_updating = false;
+                    match r {
+                        Ok(tag) => self.launcher_installed = Some(tag),
+                        Err(e) => {
+                            self.log(Src::Launcher, format!("Launcher update failed: {e}"));
+                            self.launcher_error = Some(e);
+                        }
                     }
                 }
                 Event::Schema(r) => {
@@ -675,6 +724,47 @@ impl App {
             App::emit(&tx, &ctx, Event::Stage(None));
             App::emit(&tx, &ctx, Event::FlowDone(res.map_err(|e| format!("{e:#}"))));
         });
+    }
+
+    // ---------- the launcher's own updates ----------
+    pub fn check_launcher(&mut self) {
+        if self.launcher_checking {
+            return;
+        }
+        self.launcher_checking = true;
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let r = selfupdate::latest().map_err(|e| format!("{e:#}"));
+            App::emit(&tx, &ctx, Event::LauncherRelease(r));
+        });
+    }
+
+    /// A newer launcher is published and not installed yet.
+    pub fn launcher_update_available(&self) -> bool {
+        self.launcher_installed.is_none() && matches!(&self.launcher_release, Some(Ok(r)) if r.is_newer_than(selfupdate::CURRENT))
+    }
+
+    pub fn update_launcher(&mut self) {
+        let (Some(Ok(rel)), Some(exe)) = (self.launcher_release.clone(), self.exe.clone()) else { return };
+        if self.launcher_updating {
+            return;
+        }
+        self.launcher_updating = true;
+        self.launcher_error = None;
+        let (sink, tx, ctx) = (self.sink(Src::Launcher), self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let r = selfupdate::install(&rel, &exe, &sink).map(|()| rel.tag.clone()).map_err(|e| format!("{e:#}"));
+            App::emit(&tx, &ctx, Event::LauncherInstalled(r));
+        });
+    }
+
+    /// Starts the (new) launcher and closes this one. Not while a game or our server runs.
+    pub fn restart_launcher(&mut self) {
+        let Some(exe) = self.exe.clone() else { return };
+        match std::process::Command::new(&exe).spawn() {
+            Ok(_) => self.ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Err(e) => self.log(Src::Launcher, format!("Could not start the new launcher ({}): {e}", exe.display())),
+        }
     }
 
     // ---------- server options ----------

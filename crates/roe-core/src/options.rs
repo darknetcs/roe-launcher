@@ -47,8 +47,9 @@ sys.argv = [script]
 runpy.run_path(script, run_name="__main__")
 "#;
 
-/// Options the launcher sets itself (or that only make sense for other setups): never shown.
-pub const MANAGED: [&str; 8] = ["--client", "--dotnet", "--key-file", "--verify-only", "--remote-peer", "--lan-tunnel", "--services-only", "--duration"];
+/// Options the launcher sets itself, or that cannot work with how it starts the server: never shown.
+/// `--debug-console` belongs to the game client and windows_launch.py refuses it with `--services-only`.
+pub const MANAGED: [&str; 9] = ["--client", "--dotnet", "--key-file", "--verify-only", "--remote-peer", "--lan-tunnel", "--services-only", "--duration", "--debug-console"];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ServerOption {
@@ -130,7 +131,8 @@ pub fn read_schema(dir: &Path, python: &Path, sink: &Sink) -> Result<Vec<ServerO
     let cache_path = dir.join(".tools/roe-launcher-options.json");
     if let Ok(c) = fs::read_to_string(&cache_path).map_err(anyhow::Error::from).and_then(|t| Ok(serde_json::from_str::<Cache>(&t)?)) {
         if c.script_sha256 == sha {
-            return Ok(c.options);
+            // filter again: a cache written by an older launcher may hold options now managed
+            return Ok(c.options.into_iter().filter(|o| !MANAGED.contains(&o.flag.as_str())).collect());
         }
     }
     if !python.is_file() {
@@ -225,7 +227,8 @@ mod tests {
         {"flag":"--kit","switch":false,"type":null,"choices":["snowboard","glider","climb"],"default":"snowboard","help":"","required":false},
         {"flag":"--practice-targets","switch":false,"type":"int","choices":["1","2","3"],"default":1,"help":"Targets 1..10","required":false},
         {"flag":"--live-control","switch":true,"type":null,"choices":null,"default":false,"help":"Local live commands","required":false},
-        {"flag":"--duration","switch":false,"type":"int","choices":null,"default":3600,"help":"","required":false}
+        {"flag":"--duration","switch":false,"type":"int","choices":null,"default":3600,"help":"","required":false},
+        {"flag":"--debug-console","switch":true,"type":null,"choices":null,"default":false,"help":"client only","required":false}
     ]"#;
 
     #[test]

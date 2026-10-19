@@ -31,7 +31,7 @@ pub struct InstallInfo {
     pub untranslated: Option<u32>,
 }
 
-fn agent(secs: u64) -> ureq::Agent {
+pub(crate) fn agent(secs: u64) -> ureq::Agent {
     ureq::AgentBuilder::new().timeout(Duration::from_secs(secs)).user_agent("roe-launcher").build()
 }
 

@@ -92,7 +92,7 @@ pub fn run_logged(cmd: &mut Command, sink: &Sink) -> Result<()> {
     Ok(())
 }
 
-fn sha256_hex(p: &Path) -> Result<String> {
+pub(crate) fn sha256_hex(p: &Path) -> Result<String> {
     Ok(format!("{:x}", Sha256::digest(fs::read(p)?)))
 }
 

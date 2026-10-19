@@ -10,6 +10,7 @@ pub mod options;
 pub mod process;
 pub mod proton;
 pub mod runtime;
+pub mod selfupdate;
 pub mod server;
 pub mod servers;
 pub mod steam;

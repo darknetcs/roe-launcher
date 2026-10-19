@@ -114,6 +114,8 @@ pub struct Config {
     /// Where the launcher keeps its own copy of the server files.
     pub server_dir: Option<PathBuf>,
     pub check_updates_on_start: bool,
+    /// Look for a newer launcher on GitHub when it starts.
+    pub check_launcher_updates: bool,
     pub translate_after_update: bool,
     pub stop_server_on_game_exit: bool,
     pub proton_log: bool,
@@ -149,6 +151,7 @@ impl Default for Config {
             compat_data: None,
             server_dir: None,
             check_updates_on_start: true,
+            check_launcher_updates: true,
             translate_after_update: true,
             stop_server_on_game_exit: true,
             proton_log: false,
