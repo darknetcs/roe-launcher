@@ -59,7 +59,7 @@ fn candidate_roots() -> Vec<PathBuf> {
 /// Windows: what Steam wrote to the registry, then the default folders.
 #[cfg(windows)]
 fn candidate_roots() -> Vec<PathBuf> {
-    let mut v: Vec<PathBuf> = registry_steam_path().into_iter().collect();
+    let mut v: Vec<PathBuf> = registry_steam("SteamPath").into_iter().collect();
     for var in ["ProgramFiles(x86)", "ProgramFiles"] {
         if let Some(p) = std::env::var_os(var) {
             v.push(PathBuf::from(p).join("Steam"));
@@ -69,12 +69,12 @@ fn candidate_roots() -> Vec<PathBuf> {
     v
 }
 
-/// `HKCU\Software\Valve\Steam\SteamPath` (Steam writes it with forward slashes).
+/// A path value under `HKCU\Software\Valve\Steam` ("SteamPath", "SteamExe"); Steam writes forward slashes.
 #[cfg(windows)]
-fn registry_steam_path() -> Option<PathBuf> {
+fn registry_steam(name: &str) -> Option<PathBuf> {
     use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
     let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
-    let (key, value) = (wide(r"Software\Valve\Steam"), wide("SteamPath"));
+    let (key, value) = (wide(r"Software\Valve\Steam"), wide(name));
     let mut buf = vec![0u16; 1024];
     let mut size = (buf.len() * 2) as u32;
     // SAFETY: the buffer and its size in bytes are passed together; the result is NUL-terminated.
@@ -85,6 +85,91 @@ fn registry_steam_path() -> Option<PathBuf> {
     let len = buf.iter().position(|&c| c == 0).unwrap_or(0);
     let s = String::from_utf16_lossy(&buf[..len]);
     (!s.is_empty()).then(|| PathBuf::from(s.replace('/', "\\")))
+}
+
+/// `StateFlags` of the game's app manifest in any library (4 = fully installed; other values while Steam
+/// is downloading or updating). None when no library has a manifest for it.
+pub fn install_state(libs: &[PathBuf]) -> Option<u32> {
+    libs.iter().find_map(|lib| {
+        let text = fs::read_to_string(lib.join(format!("steamapps/appmanifest_{APPID}.acf"))).ok()?;
+        vdf_values(&text, "StateFlags").into_iter().next()?.parse().ok()
+    })
+}
+
+/// Steam has finished installing the game (or it was installed without Steam: no manifest).
+pub fn install_finished(libs: &[PathBuf]) -> bool {
+    install_state(libs).is_none_or(|flags| flags == 4)
+}
+
+/// Opens Steam's install dialog for the game (only works when it is in the user's Steam library).
+pub const INSTALL_URL: &str = "steam://install/755790";
+
+/// The first of `names` found in `dirs` (a PATH search without running anything).
+pub fn which_in(dirs: &[PathBuf], names: &[&str]) -> Option<PathBuf> {
+    dirs.iter().flat_map(|d| names.iter().map(move |n| d.join(n))).find(|p| p.is_file())
+}
+
+#[cfg(not(windows))]
+fn path_dirs() -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    // Debian/Ubuntu put steam in /usr/games, which is not always on a desktop app's PATH
+    for extra in ["/usr/games", "/usr/bin", "/usr/local/bin"] {
+        if !v.iter().any(|d| d == Path::new(extra)) {
+            v.push(PathBuf::from(extra));
+        }
+    }
+    v
+}
+
+/// Ways to ask Steam to install the game, most direct first. Passing the steam:// link to Steam itself
+/// works even when nothing is registered for steam:// links; the system's link handler is the fallback.
+pub fn install_commands() -> Vec<(PathBuf, Vec<String>)> {
+    let url = INSTALL_URL.to_string();
+    let mut v: Vec<(PathBuf, Vec<String>)> = Vec::new();
+    #[cfg(windows)]
+    {
+        let mut exes: Vec<PathBuf> = registry_steam("SteamExe").into_iter().collect();
+        exes.extend(candidate_roots().into_iter().map(|r| r.join("steam.exe")));
+        for exe in exes.into_iter().filter(|p| p.is_file()) {
+            if !v.iter().any(|(p, _)| *p == exe) {
+                v.push((exe, vec![url.clone()]));
+            }
+        }
+        v.push((PathBuf::from("explorer"), vec![url]));
+    }
+    #[cfg(not(windows))]
+    {
+        let dirs = path_dirs();
+        if let Some(steam) = which_in(&dirs, &["steam"]) {
+            v.push((steam, vec![url.clone()]));
+        }
+        for root in steam_roots() {
+            let script = root.join("steam.sh");
+            if script.is_file() {
+                v.push((script, vec![url.clone()]));
+            }
+        }
+        let flatpak_steam = dirs::home_dir().is_some_and(|h| h.join(".var/app/com.valvesoftware.Steam").is_dir());
+        if let (true, Some(flatpak)) = (flatpak_steam, which_in(&dirs, &["flatpak"])) {
+            v.push((flatpak, vec!["run".into(), "com.valvesoftware.Steam".into(), url.clone()]));
+        }
+        v.push((PathBuf::from("xdg-open"), vec![url]));
+    }
+    v
+}
+
+/// Asks Steam to show the install dialog. Returns how it was asked, or every attempt's error.
+pub fn request_install() -> Result<String, String> {
+    let mut errors = Vec::new();
+    for (program, args) in install_commands() {
+        let mut cmd = std::process::Command::new(&program);
+        cmd.args(&args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        match cmd.spawn() {
+            Ok(_) => return Ok(program.display().to_string()),
+            Err(e) => errors.push(format!("{}: {e}", program.display())),
+        }
+    }
+    Err(errors.join("; "))
 }
 
 /// Steam installations: native, Flatpak, and the usual symlinks (deduplicated).
@@ -180,5 +265,40 @@ mod tests {
         fs::create_dir_all(lib.join("steamapps/compatdata/755790")).unwrap();
         assert_eq!(find_game(&[lib.clone()]), Some(game.clone()));
         assert_eq!(steam_prefix_for(&game), Some(lib.join("steamapps/compatdata/755790")));
+    }
+
+    #[test]
+    fn finds_programs_like_a_path_search() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(b.join("steam")).unwrap(); // a folder named steam is not a program
+        fs::write(a.join("flatpak"), "").unwrap();
+        assert_eq!(which_in(&[b.clone(), a.clone()], &["steam"]), None);
+        assert_eq!(which_in(&[b, a.clone()], &["steam", "flatpak"]), Some(a.join("flatpak")));
+    }
+
+    #[test]
+    fn the_last_resort_is_the_systems_link_handler() {
+        let cmds = install_commands();
+        let (last, args) = cmds.last().unwrap();
+        assert_eq!(args.last().map(String::as_str), Some(INSTALL_URL));
+        assert!(last.ends_with(if cfg!(windows) { "explorer" } else { "xdg-open" }));
+        // every way passes the same link
+        assert!(cmds.iter().all(|(_, a)| a.last().map(String::as_str) == Some(INSTALL_URL)));
+    }
+
+    #[test]
+    fn waits_for_steam_to_finish_installing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = tmp.path().to_path_buf();
+        fs::create_dir_all(lib.join("steamapps")).unwrap();
+        assert!(install_finished(&[lib.clone()])); // no manifest: a copy installed by hand
+        let manifest = |flags: u32| format!("\"AppState\"\n{{\n\t\"appid\"\t\t\"755790\"\n\t\"StateFlags\"\t\t\"{flags}\"\n}}\n");
+        fs::write(lib.join("steamapps/appmanifest_755790.acf"), manifest(1026)).unwrap();
+        assert_eq!(install_state(&[lib.clone()]), Some(1026));
+        assert!(!install_finished(&[lib.clone()]));
+        fs::write(lib.join("steamapps/appmanifest_755790.acf"), manifest(4)).unwrap();
+        assert!(install_finished(&[lib]));
     }
 }

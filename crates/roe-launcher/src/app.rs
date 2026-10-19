@@ -169,6 +169,15 @@ pub struct App {
     /// Previews already asked for (made, failed or on their way), so each is decoded once.
     thumbs_requested: HashSet<Background>,
     pub custom_bgs: Vec<String>,
+    /// "Install with Steam": how Steam was asked (or why it could not be), and since when we wait.
+    pub steam_install: Option<Result<String, String>>,
+    pub install_wait: Option<Instant>,
+    last_install_check: Instant,
+    /// Steam reports the game as not fully installed yet (downloading or updating).
+    steam_installing: bool,
+    /// `ROE_SCREENSHOT=<file.png>` (development): save the window after start-up, then close.
+    screenshot: Option<PathBuf>,
+    frames: u64,
     pub browser: Browser,
     /// Running under Wine / Proton: work around what its Windows emulation lacks (see `wine_fixes`).
     wine: bool,
@@ -232,6 +241,12 @@ impl App {
             thumbs: HashMap::new(),
             thumbs_requested: HashSet::new(),
             custom_bgs: backgrounds::list(&backgrounds::dir()),
+            steam_install: None,
+            install_wait: None,
+            last_install_check: Instant::now(),
+            steam_installing: false,
+            screenshot: std::env::var_os("ROE_SCREENSHOT").map(PathBuf::from),
+            frames: 0,
             browser: Browser { instance: instance_id(), ..Default::default() },
             wine: roe_core::under_wine(),
             #[cfg(windows)]
@@ -411,13 +426,34 @@ impl App {
         self.roots = steam::steam_roots();
         self.libs = steam::libraries(&self.roots);
         self.runtimes = proton::detect(&self.roots, &self.libs);
-        self.detected_game = steam::find_game(&self.libs);
+        self.detected_game = if pretend_no_game() { None } else { steam::find_game(&self.libs) };
+        // Steam is still downloading or updating it (its manifest says so, even before the exe exists):
+        // the files may be half written, so wait
+        self.steam_installing = !pretend_no_game() && !steam::install_finished(&self.libs);
+        if self.steam_installing {
+            self.detected_game = None;
+            self.install_wait.get_or_insert_with(Instant::now);
+            return;
+        }
         if self.cfg.game_dir.as_ref().map(|p| !game::is_game_dir(p)).unwrap_or(true) {
             if let Some(g) = self.detected_game.clone() {
                 self.cfg.game_dir = Some(g);
             }
         }
         self.game_input = self.cfg.game_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+    }
+
+    /// Asks Steam to install the game; `tick` then looks for it every few seconds.
+    pub fn request_game_install(&mut self) {
+        let r = steam::request_install();
+        match &r {
+            Ok(how) => {
+                self.log(Src::Launcher, format!("Asked Steam to install Ring of Elysium ({how}). The launcher will find it when the download finishes."));
+                self.install_wait = Some(Instant::now());
+            }
+            Err(e) => self.log(Src::Launcher, format!("Could not open Steam: {e}")),
+        }
+        self.steam_install = Some(r);
     }
 
     pub fn set_game_from_text(&mut self) {
@@ -435,7 +471,7 @@ impl App {
     }
 
     pub fn game_ok(&self) -> bool {
-        self.cfg.game_dir.as_deref().map(game::is_game_dir).unwrap_or(false)
+        !pretend_no_game() && !self.steam_installing && self.cfg.game_dir.as_deref().map(game::is_game_dir).unwrap_or(false)
     }
 
     pub fn refresh_info(&mut self) {
@@ -947,6 +983,30 @@ impl App {
         }
         self.client_was_running = running;
 
+        // No game yet (or Steam installing it): look every 5 s, so an install started here, in Steam or
+        // before the launcher opened is noticed, and PLAY appears once Steam reports it complete
+        // (the exe appears long before the download ends). Only two small files are read.
+        let watch = (!self.game_ok() || self.install_wait.is_some()) && !pretend_no_game();
+        if watch && self.last_install_check.elapsed() > Duration::from_secs(5) {
+            self.last_install_check = Instant::now();
+            let libs = steam::libraries(&steam::steam_roots());
+            if !steam::install_finished(&libs) {
+                if !self.steam_installing {
+                    self.log(Src::Launcher, "Steam is installing Ring of Elysium; PLAY appears when it finishes.".into());
+                }
+                self.steam_installing = true;
+                self.install_wait.get_or_insert_with(Instant::now);
+            } else if steam::find_game(&libs).is_some() {
+                let was_waiting = self.install_wait.is_some() || self.steam_installing;
+                self.install_wait = None;
+                self.steam_installing = false;
+                self.detect();
+                if was_waiting {
+                    self.log(Src::Launcher, "Steam finished installing Ring of Elysium: ready to play.".into());
+                }
+            }
+        }
+
         // hash check when the game folder changes
         if self.cfg.game_dir != self.build_for {
             self.build_for = self.cfg.game_dir.clone();
@@ -1020,6 +1080,12 @@ fn open_log_file() -> Option<std::io::LineWriter<std::fs::File>> {
     std::fs::File::create(dir.join("launcher.log")).ok().map(std::io::LineWriter::new)
 }
 
+/// `ROE_PRETEND_NO_GAME=1` (development): act as if the game is not installed, without touching the
+/// settings, to test "Install via Steam" with the real Steam.
+fn pretend_no_game() -> bool {
+    std::env::var("ROE_PRETEND_NO_GAME").as_deref() == Ok("1")
+}
+
 /// Different for every launcher run (no randomness crate needed for this).
 fn instance_id() -> String {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
@@ -1044,7 +1110,28 @@ fn tex(ctx: &egui::Context, name: &str, bytes: &[u8]) -> egui::TextureHandle {
 }
 
 impl eframe::App for App {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        let Some(path) = self.screenshot.clone() else { return };
+        for ev in &raw_input.events {
+            if let egui::Event::Screenshot { image, .. } = ev {
+                let bytes: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
+                if let Some(img) = image::RgbaImage::from_raw(image.width() as u32, image.height() as u32, bytes) {
+                    let r = img.save(&path).map_err(|e| e.to_string());
+                    self.log(Src::Launcher, format!("Screenshot {}: {r:?}", path.display()));
+                }
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.screenshot.is_some() {
+            self.frames += 1;
+            if self.frames == 90 {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+            }
+            ctx.request_repaint();
+        }
         #[cfg(windows)]
         if self.wine && !self.uia_blocked {
             self.uia_blocked = true;

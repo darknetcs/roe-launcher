@@ -22,6 +22,7 @@ pub enum SrvState {
 
 enum Action {
     Play,
+    InstallGame,
     ServerOnly,
     StopServer,
     StopGame,
@@ -330,13 +331,33 @@ impl App {
         let game_up = self.client_running();
         let mut action = None;
         ui.horizontal(|ui| {
-            let label = if game_up { "GAME RUNNING" } else if busy { "WORKING…" } else { "PLAY" };
-            let font = egui::FontFamily::Name(assets::PLAY_FAMILY.into());
-            let btn = egui::Button::new(RichText::new(label).size(34.0).family(font).color(pal.text))
+            // no game found: the main button installs it through Steam instead
+            let install = !self.game_ok();
+            let label = if game_up {
+                "GAME RUNNING"
+            } else if busy {
+                "WORKING…"
+            } else if install && self.install_wait.is_some() {
+                "INSTALLING…"
+            } else if install {
+                // this exact mix of cases: some Gemina capitals look wrong
+                "INSTALL vIA StEAm"
+            } else {
+                "PLAY"
+            };
+            // the long install label in a smaller size, so the button keeps PLAY's proportions
+            let size = if install { 20.0 } else { 34.0 };
+            let text = RichText::new(label).size(size).family(egui::FontFamily::Name(assets::PLAY_FAMILY.into())).color(pal.text);
+            let btn = egui::Button::new(text)
                 .fill(pal.accent)
                 .min_size(vec2(250.0, 60.0))
                 .corner_radius(CornerRadius::same(14));
-            if ui.add_enabled(blockers.is_empty() && !busy && !game_up, btn).clicked() {
+            if install {
+                let r = ui.add_enabled(self.install_wait.is_none() && !busy, btn).on_hover_text("Opens Steam's install dialog for Ring of Elysium (it must be in your Steam library)");
+                if r.clicked() {
+                    action = Some(Action::InstallGame);
+                }
+            } else if ui.add_enabled(blockers.is_empty() && !busy && !game_up, btn).clicked() {
                 action = Some(Action::Play);
             }
             ui.vertical(|ui| {
@@ -361,6 +382,9 @@ impl App {
         });
         for b in &blockers {
             ui.colored_label(pal.warn, b);
+        }
+        if !self.game_ok() {
+            self.steam_install_help(ui, pal);
         }
         if let Some(e) = &self.flow_error {
             ui.colored_label(pal.bad, e);
@@ -388,6 +412,7 @@ impl App {
 
         match action {
             Some(Action::Play) => self.start_flow(true),
+            Some(Action::InstallGame) => self.request_game_install(),
             Some(Action::ServerOnly) => self.start_flow(false),
             Some(Action::StopServer) => self.stop_server(),
             Some(Action::StopGame) => self.stop_game(),
@@ -411,7 +436,7 @@ impl App {
             }
             _ => {
                 ui.label(RichText::new("Not found").size(19.0).strong().color(pal.bad));
-                muted(ui, pal, format!("Choose the folder in {GAME_PAGE}"));
+                muted(ui, pal, format!("Install it with the button below, or choose the folder in {GAME_PAGE}"));
             }
         }
     }
@@ -712,7 +737,10 @@ impl App {
                         None => status_line(ui, pal.muted, "Checking the executable…"),
                     }
                 }
-                _ => status_line(ui, pal.bad, "No game folder selected"),
+                _ => {
+                    status_line(ui, pal.bad, "No game folder selected");
+                    self.install_with_steam(ui, pal);
+                }
             }
             if !self.libs.is_empty() {
                 ui.label(RichText::new(format!("Steam libraries scanned: {}", self.libs.iter().map(|l| short(&l.display().to_string(), 36)).collect::<Vec<_>>().join(", "))).size(12.5).color(pal.muted));
@@ -797,6 +825,34 @@ impl App {
             });
             ui.label(RichText::new("Automatic = the game's own Steam prefix when there is one, otherwise a private prefix the launcher creates.").size(12.5).color(pal.muted));
         });
+    }
+
+    /// Shown when no game is found: ask Steam to install it, then wait for the download.
+    fn install_with_steam(&mut self, ui: &mut Ui, pal: &Palette) {
+        if self.install_wait.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                muted(ui, pal, "Waiting for Steam to install Ring of Elysium…");
+            });
+        } else if ui.button("Install with Steam").on_hover_text("Opens Steam's install dialog for Ring of Elysium").clicked() {
+            self.request_game_install();
+        }
+        ui.label(RichText::new("Needs Ring of Elysium in your Steam library.").size(12.5).color(pal.muted));
+        self.steam_install_help(ui, pal);
+    }
+
+    /// When Steam could not be reached: the manual way and the link to copy.
+    fn steam_install_help(&self, ui: &mut Ui, pal: &Palette) {
+        if let Some(Err(e)) = &self.steam_install {
+            ui.colored_label(pal.bad, format!("Could not open Steam ({e})."));
+            ui.label(RichText::new("In Steam: Library > Ring of Elysium > Install, or open this link:").size(12.5).color(pal.muted));
+            ui.horizontal(|ui| {
+                ui.monospace(roe_core::steam::INSTALL_URL);
+                if ui.small_button("Copy").clicked() {
+                    ui.ctx().copy_text(roe_core::steam::INSTALL_URL.to_string());
+                }
+            });
+        }
     }
 
     fn proton_label(&self) -> String {

@@ -38,6 +38,8 @@ A `roe-launcher.desktop` file is included if you want a menu entry.
 
 ### Then, on both
 Check that **Play Locally** shows your game (it is found through Steam automatically) and press **PLAY**.
+No game installed? The button reads **INSTALL vIA StEAm**: it opens Steam's install dialog for Ring of Elysium
+(it must be in your Steam library), and turns into **PLAY** once Steam has finished the download.
 
 The first start downloads what the server needs (a few hundred MB), then startup is quick:
 * the server files from GitHub;
@@ -52,6 +54,7 @@ The first start downloads what the server needs (a few hundred MB), then startup
 | **Play** | One button: prepares the server, starts it, waits until its ports are up, then starts the game. When the game closes, the server it started is stopped again. You can also run the server on its own. |
 | **Server Settings** | Every match option the installed server offers, read from the server itself and grouped (Match, Targets & bots, Map & world, Vehicles, Network). New upstream options show up after an update without a launcher release. Includes **practice targets** (up to 10 targets on the map) and live control. Clear error messages when the server refuses a combination. |
 | **Server status** | Live indicators for the lobby (TCP 9001), proxy (TCP 8001) and endpoint (UDP 18001), uptime, pid, and the server's own output. A server you started yourself is detected and left alone. |
+| **Install via Steam** | When no game is found, the main button asks Steam to install it (Steam is called directly, so it works even without a `steam://` link handler; manual steps and a copyable link if Steam can't be reached). While Steam downloads it shows **INSTALLING…**, and it only uses the game once Steam reports the install complete, also when the download was started in Steam itself. |
 | **Game location** | Found automatically in your Steam libraries, including libraries on other drives (Linux: `libraryfolders.vdf` of native or Flatpak Steam; Windows: Steam's registry entry). You can always browse or paste a path. The `Europa_Client.exe` hash is checked against the supported 2022 build. |
 | **Proton** *(Linux)* | Reads Steam's compatibility tools: GE-Proton, Proton-CachyOS, Proton-EM, UMU-Proton, Valve's Proton, anything with a `proton` script. Choose a fixed version, *"always the newest GE-Proton / CachyOS / …"*, or any custom folder. |
 | **Server updates** | Keeps its own copy of the server files and updates it from GitHub (exact-commit download; keeps your saved profiles, the Python/.NET tools, run logs and reports). Optionally re-applies the bundled **English translation** after every update. |
@@ -128,7 +131,7 @@ HTTPS uses the **system certificate store**, so corporate proxies and custom CAs
 
 ```bash
 cargo build --release -p roe-launcher     # Linux binary: target/release/roe-launcher
-cargo test  -p roe-core                   # 54 unit tests, no GUI needed
+cargo test  -p roe-core                   # 58 unit tests, no GUI needed
 ```
 For maximum portability build on an old glibc (the CI uses Ubuntu 22.04). The GUI libraries
 (X11/Wayland/GL/xkbcommon) are loaded at run time, so nothing GUI-specific is needed to *build*.
@@ -150,7 +153,9 @@ their checksums to the release.
 * `crates/roe-launcher` — the egui application.
 * `crates/roe-core/examples/headless.rs` — end-to-end run of the core against live GitHub, no GUI.
 
-Development switches: `ROE_START_PAGE=server|game|updates|appearance|logs|browser`, `ROE_AUTORUN=update|server|play`.
+Development switches: `ROE_START_PAGE=server|game|updates|appearance|logs|browser`, `ROE_AUTORUN=update|server|play`,
+`ROE_SCREENSHOT=<file.png>` (save the window after start-up, then close), `ROE_PRETEND_NO_GAME=1` (act as if the
+game is not installed, to try *Install via Steam*; settings are not changed).
 
 **Server Browser internals:** `roe-core/src/servers.rs` holds the entry model, merging, favourites-first
 filtering, `host:port` validation and a proposed online-list format `{"servers":[...]}` (no such list exists yet;
