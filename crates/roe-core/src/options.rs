@@ -80,7 +80,8 @@ impl ServerOption {
     pub fn help_en(&self) -> String {
         let russian = self.help.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c));
         if !self.help.is_empty() && !russian {
-            return self.help.clone();
+            // the launcher's font has no arrow glyphs
+            return self.help.replace('→', "->").replace('←', "<-");
         }
         match self.flag.as_str() {
             "--practice-targets" => "Number of passive targets, 1..10; requires Target".into(),
@@ -240,6 +241,8 @@ mod tests {
         let ru = ServerOption { help: "Число пассивных мишеней1..10; требует Target".into(), ..s[1].clone() };
         assert_eq!(ru.help_en(), "Number of passive targets, 1..10; requires Target");
         assert_eq!(s[2].help_en(), "Local live commands");
+        let arrow = ServerOption { help: "Single BOT05 Citori/12ga→safe".into(), ..s[2].clone() };
+        assert_eq!(arrow.help_en(), "Single BOT05 Citori/12ga->safe");
     }
 
     #[test]

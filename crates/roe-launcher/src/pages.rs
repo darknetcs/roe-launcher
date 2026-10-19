@@ -377,10 +377,12 @@ impl App {
                     Src::Server => ("server", pal.good),
                     Src::Client => ("game", pal.warn),
                 };
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("{:>8}", tag.0)).monospace().color(tag.1));
-                    ui.label(RichText::new(head(t, 110)).monospace().color(pal.muted));
-                });
+                // one label per line: compact, and the source tag and message stay on one baseline
+                let mono = egui::FontId::monospace(13.0);
+                let mut job = egui::text::LayoutJob::default();
+                job.append(&format!("{:>8}  ", tag.0), 0.0, egui::TextFormat::simple(mono.clone(), tag.1));
+                job.append(&head(t, 110), 0.0, egui::TextFormat::simple(mono, pal.muted));
+                ui.label(job);
             }
         });
 
