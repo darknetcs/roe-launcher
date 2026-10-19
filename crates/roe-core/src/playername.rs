@@ -4,6 +4,9 @@
 //!   the text "BRING_BACK_ROE!!" too: the key and `lobby-ck.bin` are left alone, only the packet changes;
 //! - the enter-room reply (`config/wire.json`, picked by `config/room.json`), field `profile.base.m014`.
 //!
+//! The same enter-room reply also names the map, `profile.base.m644` (16010 = Dione, see `maps`), so the map choice
+//! is applied here too.
+//!
 //! Before every server start the launcher runs `PATCH_PY` with the server's own Python, reusing upstream's
 //! decoder and AES code. It keeps the original of each file it edits (`*.roe-original`) and always patches from
 //! that copy, so an empty name restores upstream exactly. A server update brings fresh files and the name is
@@ -46,10 +49,11 @@ pub struct Applied {
     pub room: bool,
 }
 
-/// Puts `name` (already validated; empty = originals) into the server files in `dir`.
-pub fn apply(p: &Prepared, dir: &Path, name: &str) -> Result<Applied> {
+/// Puts `name` (already validated; empty = originals) and the map ID into the server files in `dir`.
+/// `map` = `crate::maps::DIONE` keeps upstream's map.
+pub fn apply(p: &Prepared, dir: &Path, name: &str, map: u32) -> Result<Applied> {
     let mut c = Command::new(&p.python);
-    c.args(["-I", "-X", "utf8", "-B", "-c", PATCH_PY]).arg(dir).arg(name).current_dir(dir);
+    c.args(["-I", "-X", "utf8", "-B", "-c", PATCH_PY]).arg(dir).arg(name).arg(map.to_string()).current_dir(dir);
     hide_window(&mut c);
     let out = c.output().context("running the server's Python")?;
     let text = String::from_utf8_lossy(&out.stdout);
@@ -57,17 +61,17 @@ pub fn apply(p: &Prepared, dir: &Path, name: &str) -> Result<Applied> {
     if !out.status.success() || !last.starts_with('{') {
         let err = String::from_utf8_lossy(&out.stderr);
         let why = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or(last).trim().to_string();
-        bail!("could not set the player name: {why}");
+        bail!("could not set the player name and map: {why}");
     }
-    serde_json::from_str(last).map_err(|e| anyhow!("could not set the player name: {e} ({last})"))
+    serde_json::from_str(last).map_err(|e| anyhow!("could not set the player name and map: {e} ({last})"))
 }
 
-/// Run as `python -c PATCH_PY <server dir> <name>`; prints `{"lobby": bool, "room": bool}` as its last line.
+/// Run as `python -c PATCH_PY <server dir> <name> <map id>`; prints `{"lobby": bool, "room": bool}` as its last line.
 /// Errors (an upstream layout it doesn't recognise) end it with a message and touch nothing more.
 pub const PATCH_PY: &str = r#"
 import sys, re, json, struct, hashlib, shutil
 from pathlib import Path
-root, name = Path(sys.argv[1]), sys.argv[2]
+root, name, map_id = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3])
 sys.path.insert(0, str(root / 'tools'))
 from roe_protocol_2022 import encrypt, decrypt
 from roe_room_2023 import decode_enter_room_response
@@ -116,23 +120,32 @@ if lobby:
     for d in ('bin', 'obj'):
         shutil.rmtree(root / 'server/lobby/LobbyEmulator.Sdk' / d, ignore_errors=True)
 
-# match: profile.base.m014 of the enter-room reply ("LOCAL" when empty)
+# match: the enter-room reply's profile.base.m014 = name ("LOCAL" when empty), profile.base.m644 = map
 room_f, room_src = original('config/room.json')
 wire_f, wire_src = original('config/wire.json')
 wire = json.loads(wire_src)
 token = json.loads(room_src)['room_file'].removeprefix('@wire/')
 raw = bytes.fromhex(wire[token]['hex'])
-field = {f['name']: f for f in decode_enter_room_response(raw)['fields']}.get('profile.base.m014')
-if not field or struct.unpack_from('>I', raw, field['offset'] - 4)[0] != field['length']:
+def fields(b):
+    return {f['name']: f for f in decode_enter_room_response(b)['fields']}
+field, map_field = fields(raw).get('profile.base.m014'), fields(raw).get('profile.base.m644')
+if not field or struct.unpack_from('>I', raw, field['offset'] - 4)[0] != field['length'] or not map_field:
     sys.exit('the room reply has a new layout (upstream changed it)')
+new = raw
 if name:
     at = field['offset']
-    new = raw[:at - 4] + text_field(name) + raw[at + field['length']:]
-    check = {f['name']: f for f in decode_enter_room_response(new)['fields']}['profile.base.m014']['value']
-    if check != name.encode('utf-8') + b'\0':
+    new = new[:at - 4] + text_field(name) + new[at + field['length']:]
+if map_id != struct.unpack_from('>I', raw, map_field['offset'])[0]:
+    # the name may have moved it
+    at = fields(new)['profile.base.m644']['offset']
+    new = new[:at] + struct.pack('>I', map_id) + new[at + 4:]
+if new != raw:
+    check = fields(new)
+    if (name and check['profile.base.m014']['value'] != name.encode('utf-8') + b'\0') or \
+            struct.unpack_from('>I', new, check['profile.base.m644']['offset'])[0] != map_id:
         sys.exit('the new room reply did not read back correctly')
     new_token = hashlib.sha256(new).hexdigest()
-    wire[new_token] = dict(wire[token], hex=new.hex(), size=len(new), source='roe-launcher player name')
+    wire[new_token] = dict(wire[token], hex=new.hex(), size=len(new), source='roe-launcher player name and map')
     room_text = json.dumps({'room_file': '@wire/' + new_token})
     wire_text = json.dumps(wire, indent=2) + '\n'
 else:
@@ -171,19 +184,28 @@ mod tests {
         }
         let python = if cfg!(windows) { src.join(".tools/python/python.exe") } else { src.join(".tools/venv/bin/python3") };
         let p = Prepared { python, dotnet: "dotnet".into(), dotnet_root: None };
+        const D: u32 = crate::maps::DIONE;
         let lobby_cs = dir.join("search/Ring-of-Elysium-Lobby-Emulator/LobbyEmulator/Logic/LobbyPreData.cs");
         // the source server may already carry a name: start from upstream's files
-        apply(&p, &dir, "").unwrap();
+        apply(&p, &dir, "", D).unwrap();
         let upstream = [std::fs::read(&lobby_cs).unwrap(), std::fs::read(dir.join("config/room.json")).unwrap(), std::fs::read(dir.join("config/wire.json")).unwrap()];
 
         // the default keeps the lobby packet as upstream recorded it
-        assert_eq!(apply(&p, &dir, DEFAULT).unwrap(), Applied { lobby: false, room: true });
-        assert_eq!(apply(&p, &dir, "darknetcs").unwrap(), Applied { lobby: true, room: true });
+        assert_eq!(apply(&p, &dir, DEFAULT, D).unwrap(), Applied { lobby: false, room: true });
+        assert_eq!(apply(&p, &dir, "darknetcs", D).unwrap(), Applied { lobby: true, room: true });
         assert!(!dir.join("server/lobby/LobbyEmulator.Sdk/bin").exists());
-        assert_eq!(apply(&p, &dir, "darknetcs").unwrap(), Applied { lobby: false, room: false });
-        assert_eq!(apply(&p, &dir, "Maciej").unwrap(), Applied { lobby: true, room: true });
-        assert_eq!(apply(&p, &dir, "").unwrap(), Applied { lobby: true, room: true });
-        assert_eq!(apply(&p, &dir, "").unwrap(), Applied { lobby: false, room: false });
+        assert_eq!(apply(&p, &dir, "darknetcs", D).unwrap(), Applied { lobby: false, room: false });
+        assert_eq!(apply(&p, &dir, "Maciej", D).unwrap(), Applied { lobby: true, room: true });
+        // the map changes only the room reply; back to Dione restores it
+        let room_before = std::fs::read(dir.join("config/room.json")).unwrap();
+        assert_eq!(apply(&p, &dir, "Maciej", 16007).unwrap(), Applied { lobby: false, room: true });
+        assert_eq!(apply(&p, &dir, "Maciej", 16007).unwrap(), Applied { lobby: false, room: false });
+        assert_eq!(apply(&p, &dir, "Maciej", D).unwrap(), Applied { lobby: false, room: true });
+        assert_eq!(std::fs::read(dir.join("config/room.json")).unwrap(), room_before);
+        // a map alone, with no name
+        assert_eq!(apply(&p, &dir, "", 16007).unwrap(), Applied { lobby: true, room: true });
+        assert_eq!(apply(&p, &dir, "", D).unwrap(), Applied { lobby: false, room: true });
+        assert_eq!(apply(&p, &dir, "", D).unwrap(), Applied { lobby: false, room: false });
         let now = [std::fs::read(&lobby_cs).unwrap(), std::fs::read(dir.join("config/room.json")).unwrap(), std::fs::read(dir.join("config/wire.json")).unwrap()];
         assert!(now == upstream, "clearing the name restores the upstream files");
     }

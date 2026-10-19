@@ -10,7 +10,7 @@ use roe_core::servers::{self, ServerEntry, ServerSource};
 use roe_core::update::{self, InstallInfo, Remote};
 use roe_core::options::{self, ServerOption};
 use roe_core::selfupdate::{self, Release};
-use roe_core::{client, lan, playername, runtime, steam, translate, Sink};
+use roe_core::{client, lan, maps, playername, runtime, steam, translate, Sink};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -181,8 +181,6 @@ pub struct App {
     /// Discord Rich Presence worker (only while switched on) and its last connection status.
     presence: Option<Presence>,
     pub presence_status: Arc<Mutex<String>>,
-    /// MOCK: the map picked on Server Settings. Not saved and not sent to the server yet.
-    pub mock_map: u32,
     last_presence: Instant,
     /// "Install with Steam": how Steam was asked (or why it could not be), and since when we wait.
     pub steam_install: Option<Result<String, String>>,
@@ -257,7 +255,6 @@ impl App {
             custom_bgs: backgrounds::list(&backgrounds::dir()),
             presence: None,
             presence_status: Arc::new(Mutex::new(String::new())),
-            mock_map: 16010,
             last_presence: Instant::now() - Duration::from_secs(10),
             steam_install: None,
             install_wait: None,
@@ -794,15 +791,19 @@ impl App {
                     }
                     // an unusable name was already flagged on Server Settings: start with the originals
                     let name = playername::validate(&cfg.player_name).unwrap_or_default();
-                    stage("Setting the player name…");
-                    match playername::apply(&prepared, &dir, &name) {
+                    let map = maps::playable_id(cfg.map_id);
+                    if let Some(m) = maps::by_id(map).filter(|m| m.support == maps::Support::Experimental) {
+                        l_sink(format!("Map: {} ({}) — experimental: spawns, loot and zones are still Dione's.", m.name, map));
+                    }
+                    stage("Setting the player name and map…");
+                    match playername::apply(&prepared, &dir, &name, map) {
                         Ok(a) if a.lobby => l_sink(format!(
                             "Player name {} — the lobby is rebuilt once on this start.",
                             if name.is_empty() { "cleared (original names)".to_string() } else { format!("set to \"{name}\"") }
                         )),
                         Ok(_) => {}
                         // never block playing over the name
-                        Err(e) => l_sink(format!("{e:#}. Starting with the names as they were.")),
+                        Err(e) => l_sink(format!("{e:#}. Starting with the name and map as they were.")),
                     }
                     stage("Starting the server…");
                     let settings = server::Settings {

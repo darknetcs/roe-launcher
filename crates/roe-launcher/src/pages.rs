@@ -380,60 +380,72 @@ impl App {
         }
     }
 
-    /// MOCK map selector. The map is `profile.base.m644` in the server's recorded room reply (16010 = Dione); the
-    /// other IDs come from ROE-LIVE's research notes (docs/BUILDS.md). Only Dione has server content (spawn points,
-    /// loot, zones, evacuation), so the others are shown but can't be picked yet.
+    /// Map selector (see `roe_core::maps`). Supported and experimental maps can be picked; maps whose ID isn't
+    /// known are shown greyed out. Applied when the server starts, together with the player name.
     fn map_card(&mut self, ui: &mut Ui, pal: &Palette) {
-        // (name, world folder in the game, map ID if known, playable on the community server)
-        const MAPS: [(&str, &str, Option<u32>, bool); 4] = [
-            ("Dione", "EU_IceLand_4096", Some(16010), true),
-            ("Dione at night", "EU_IcelandNight_4096", None, false),
-            ("Desert", "EU_Desert_4096", None, false),
-            ("Kill Zone", "EU_Killzone_4096", Some(16007), false),
-        ];
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Map").strong());
-            ui.label(RichText::new("PREVIEW").size(10.5).strong().color(pal.warn));
-        });
+        use roe_core::maps::{self, Support};
+        ui.label(RichText::new("Map").strong());
         ui.add_space(4.0);
+        let current = maps::playable_id(self.cfg.map_id);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
-            for (name, world, id, playable) in MAPS {
-                let selected = id == Some(self.mock_map);
-                let (rect, resp) = ui.allocate_exact_size(vec2(190.0, 104.0), if playable { Sense::click() } else { Sense::hover() });
+            for m in maps::MAPS {
+                let pickable = m.support != Support::Unknown;
+                let selected = m.id == Some(current);
+                let (rect, resp) = ui.allocate_exact_size(vec2(190.0, 104.0), if pickable { Sense::click() } else { Sense::hover() });
                 let p = ui.painter();
                 let fill = if selected { pal.accent.gamma_multiply(0.22) } else { pal.panel.gamma_multiply(0.85) };
                 let stroke = if selected {
                     Stroke::new(2.0_f32, pal.accent)
-                } else if playable && resp.hovered() {
+                } else if pickable && resp.hovered() {
                     Stroke::new(1.0_f32, pal.accent.gamma_multiply(0.6))
                 } else {
                     Stroke::new(1.0_f32, pal.muted.gamma_multiply(0.35))
                 };
                 p.rect(rect, CornerRadius::same(8), fill, stroke, egui::StrokeKind::Inside);
-                let text = if playable { pal.text } else { pal.muted };
+                let text = if pickable { pal.text } else { pal.muted };
                 let at = rect.left_top() + vec2(12.0, 10.0);
-                p.text(at, egui::Align2::LEFT_TOP, name, egui::FontId::proportional(17.0), text);
-                let id_text = id.map(|i| format!("Map {i}")).unwrap_or_else(|| "Map ID unknown".into());
+                p.text(at, egui::Align2::LEFT_TOP, m.name, egui::FontId::proportional(17.0), text);
+                let id_text = m.id.map(|i| format!("Map {i}")).unwrap_or_else(|| "Map ID unknown".into());
                 p.text(at + vec2(0.0, 24.0), egui::Align2::LEFT_TOP, id_text, egui::FontId::proportional(11.0), pal.muted);
-                p.text(at + vec2(0.0, 38.0), egui::Align2::LEFT_TOP, world, egui::FontId::proportional(11.0), pal.muted);
-                let (badge, colour) = if playable { ("Training", pal.good) } else { ("Needs server support", pal.warn) };
+                p.text(at + vec2(0.0, 38.0), egui::Align2::LEFT_TOP, m.world, egui::FontId::proportional(11.0), pal.muted);
+                let (badge, colour, hint) = match m.support {
+                    Support::Supported => ("Training", pal.good, "Playable in Training on the community server."),
+                    Support::Experimental => (
+                        "Experimental",
+                        pal.warn,
+                        "The game loads this map, but the community server only has Dione's spawn points, loot, zones and \
+                         evacuation, so expect to spawn in odd places or fall. Untested.",
+                    ),
+                    Support::Unknown => (
+                        "Needs server support",
+                        pal.muted,
+                        "The game has this map, but its map ID isn't known yet, so it can't be chosen.",
+                    ),
+                };
                 p.text(rect.left_bottom() + vec2(12.0, -12.0), egui::Align2::LEFT_BOTTOM, badge, egui::FontId::proportional(12.5), colour);
                 if selected {
                     p.text(rect.right_bottom() + vec2(-12.0, -12.0), egui::Align2::RIGHT_BOTTOM, "✔ Selected", egui::FontId::proportional(12.5), pal.accent);
                 }
-                let resp = resp.on_hover_text(if playable {
-                    "Playable in Training on the community server."
-                } else {
-                    "The game has this map, but the community server only has spawn points, loot, zones and evacuation for Dione."
-                });
-                if playable && resp.clicked() {
-                    self.mock_map = id.unwrap_or(16010);
+                if pickable && resp.on_hover_text(hint).clicked() {
+                    self.cfg.map_id = m.id.unwrap_or(maps::DIONE);
                 }
             }
         });
         ui.add_space(4.0);
-        muted(ui, pal, "Preview only: the choice isn't saved or sent to the server yet. Other maps unlock when the community server supports them.");
+        match maps::by_id(current) {
+            Some(m) if m.support == Support::Experimental => {
+                ui.colored_label(
+                    pal.warn,
+                    format!(
+                        "{} is experimental: the server still uses Dione's spawn points, loot, zones and evacuation. \
+                         If the match misbehaves, switch back to Dione.",
+                        m.name
+                    ),
+                );
+            }
+            _ => muted(ui, pal, "Takes effect the next time the server starts. More maps unlock as the community server supports them."),
+        }
     }
 
     // ---------- Play ----------

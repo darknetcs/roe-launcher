@@ -7,6 +7,7 @@ pub mod config;
 pub mod discord;
 pub mod game;
 pub mod lan;
+pub mod maps;
 pub mod options;
 pub mod playername;
 pub mod process;
