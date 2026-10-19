@@ -512,6 +512,12 @@ impl App {
                         ui.label(s);
                     });
                 }
+                // an experimental map is easy to forget once it's picked on Server Settings
+                let map = roe_core::maps::playable_id(self.cfg.map_id);
+                if let Some(m) = roe_core::maps::by_id(map).filter(|m| m.support == roe_core::maps::Support::Experimental) {
+                    ui.colored_label(pal.warn, format!("⚠ Map: {} (experimental: {}). Change it on Server Settings.", m.name, m.badge.to_lowercase()))
+                        .on_hover_text(m.note);
+                }
             });
         });
         for b in &blockers {
