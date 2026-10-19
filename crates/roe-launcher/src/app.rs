@@ -10,7 +10,7 @@ use roe_core::servers::{self, ServerEntry, ServerSource};
 use roe_core::update::{self, InstallInfo, Remote};
 use roe_core::options::{self, ServerOption};
 use roe_core::selfupdate::{self, Release};
-use roe_core::{client, lan, runtime, steam, translate, Sink};
+use roe_core::{client, lan, playername, runtime, steam, translate, Sink};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -788,6 +788,18 @@ impl App {
                     if cfg.translate_after_update && !info.translated {
                         stage("Translating to English…");
                         translate_step(&dir, true, &l_sink)?;
+                    }
+                    // an unusable name was already flagged on Server Settings: start with the originals
+                    let name = playername::validate(&cfg.player_name).unwrap_or_default();
+                    stage("Setting the player name…");
+                    match playername::apply(&prepared, &dir, &name) {
+                        Ok(a) if a.lobby => l_sink(format!(
+                            "Player name {} — the lobby is rebuilt once on this start.",
+                            if name.is_empty() { "cleared (original names)".to_string() } else { format!("set to \"{name}\"") }
+                        )),
+                        Ok(_) => {}
+                        // never block playing over the name
+                        Err(e) => l_sink(format!("{e:#}. Starting with the names as they were.")),
                     }
                     stage("Starting the server…");
                     let settings = server::Settings {

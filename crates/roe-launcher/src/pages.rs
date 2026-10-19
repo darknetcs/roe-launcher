@@ -359,6 +359,27 @@ impl App {
         }
     }
 
+    fn player_name_card(&mut self, ui: &mut Ui, pal: &Palette) {
+        ui.label(RichText::new("Player name").strong());
+        ui.add(
+            egui::TextEdit::singleline(&mut self.cfg.player_name)
+                .char_limit(roe_core::playername::MAX_LEN)
+                .desired_width(260.0)
+                .hint_text("BRING_BACK_ROE!!"),
+        );
+        match roe_core::playername::validate(&self.cfg.player_name) {
+            Err(e) => {
+                ui.colored_label(pal.bad, format!("{e} The original names are used until it is fixed."));
+            }
+            Ok(_) => muted(
+                ui,
+                pal,
+                "Your name in the lobby, on the map selection, in the newspaper and on the stats screen. Leave it empty for \
+                 the original names. Takes effect the next time the server starts.",
+            ),
+        }
+    }
+
     // ---------- Play ----------
     fn page_play(&mut self, ui: &mut Ui, pal: &Palette) {
         header(ui, pal, "Ring of Elysium");
@@ -599,6 +620,8 @@ impl App {
                 ui.colored_label(pal.bad, e);
             }
         });
+        ui.add_space(10.0);
+        card(ui, pal, op, |ui| self.player_name_card(ui, pal));
         ui.add_space(10.0);
         card(ui, pal, op, |ui| {
             ui.label(RichText::new("Files").strong());

@@ -144,6 +144,8 @@ pub struct Config {
     pub lan_name: String,
     /// Discord Rich Presence ("Playing Ring of Elysium"); off until the player switches it on.
     pub discord_presence: bool,
+    /// The in-game name (lobby, map selection, newspaper, stats); empty = upstream's names. See `playername`.
+    pub player_name: String,
     pub theme: Theme,
 }
 
@@ -173,6 +175,7 @@ impl Default for Config {
             lan_visible: false,
             lan_name: String::new(),
             discord_presence: false,
+            player_name: String::new(),
             theme: Theme::default(),
         }
     }
