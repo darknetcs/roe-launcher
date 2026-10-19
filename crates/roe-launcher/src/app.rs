@@ -251,6 +251,7 @@ impl App {
         app.detect();
         app.refresh_info();
         app.load_schema();
+        app.prune_session_logs();
         if app.cfg.check_updates_on_start {
             app.check_updates();
         }
@@ -765,6 +766,21 @@ impl App {
             Ok(_) => self.ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Err(e) => self.log(Src::Launcher, format!("Could not start the new launcher ({}): {e}", exe.display())),
         }
+    }
+
+    /// Deletes the oldest session logs (Server Settings > Session), only while no server runs.
+    pub fn prune_session_logs(&mut self) {
+        let keep = self.cfg.keep_runs as usize;
+        if keep == 0 || self.server_running() || server::ports().proxy {
+            return;
+        }
+        let dir = self.cfg.server_dir_or_default();
+        let sink = self.sink(Src::Launcher);
+        std::thread::spawn(move || match server::prune_runs(&dir, keep) {
+            Ok((0, _)) => {}
+            Ok((n, bytes)) => sink(format!("Deleted {n} old session log{} ({:.1} MB); keeping the newest {keep}.", if n == 1 { "" } else { "s" }, bytes as f64 / 1_048_576.0)),
+            Err(e) => sink(format!("Could not clean up old session logs: {e:#}")),
+        });
     }
 
     // ---------- server options ----------

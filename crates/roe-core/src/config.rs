@@ -124,6 +124,8 @@ pub struct Config {
     pub client_extra_args: String,
     pub server_extra_args: String,
     pub server_duration: u32,
+    /// Session logs (`<server>/runs/<id>`) to keep; older ones are deleted at start. 0 = keep all.
+    pub keep_runs: u32,
     /// Server Settings: match options, flag -> value ("true" = switch on). Missing = server default.
     pub server_options: BTreeMap<String, String>,
     /// Where the game connects. Always `Local` until other servers can be joined.
@@ -159,6 +161,7 @@ impl Default for Config {
             client_extra_args: String::new(),
             server_extra_args: String::new(),
             server_duration: 1500,
+            keep_runs: 20,
             server_options: crate::options::launcher_defaults(),
             connection: Connection::Local,
             favorite_servers: Vec::new(),
@@ -357,6 +360,7 @@ mod tests {
         let c = Config::load_from(tmp.path());
         assert!(!c.check_updates_on_start);
         assert_eq!(c.server_duration, 1500);
+        assert_eq!(c.keep_runs, 20);
         assert_eq!(c.server_options, crate::options::launcher_defaults());
     }
 }

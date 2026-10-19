@@ -12,8 +12,10 @@ use std::time::Duration;
 
 pub const REPO: &str = "ROE-LIVE/ring-of-elysium-local";
 pub const BRANCH: &str = "main";
-/// Folders that survive an update.
-const KEEP: [&str; 2] = [".tools", "runs"];
+/// Folders that survive an update: the folders upstream's .gitignore treats as the user's local data.
+/// `runtime/` holds the saved profiles (local-account/, local-accounts/NAME/ with the chosen character and
+/// cosmetics) and caches; `reports/` the exported test reports; `runs/` the session logs; `.tools/` Python/.NET.
+pub const KEEP: [&str; 4] = [".tools", "runs", "runtime", "reports"];
 const INFO_FILE: &str = ".roe-launcher.json";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -253,17 +255,24 @@ mod tests {
     }
 
     #[test]
-    fn swap_keeps_tools_and_runs_but_replaces_the_rest() {
+    fn swap_keeps_the_users_data_but_replaces_the_rest() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("server");
         fs::create_dir_all(dir.join(".tools/venv")).unwrap();
         fs::create_dir_all(dir.join("runs/r1")).unwrap();
+        fs::create_dir_all(dir.join("runtime/local-account")).unwrap();
+        fs::write(dir.join("runtime/local-account/cosmetics.json"), "{\"outfit\":7}").unwrap();
+        fs::create_dir_all(dir.join("reports")).unwrap();
+        fs::write(dir.join("reports/w19.zip"), "r").unwrap();
         fs::write(dir.join("stale.txt"), "old").unwrap();
         let fresh = tmp.path().join("server.new");
         fs::create_dir_all(&fresh).unwrap();
         fs::write(fresh.join("requirements.txt"), "new").unwrap();
         swap_in(&fresh, &dir).unwrap();
         assert!(dir.join(".tools/venv").is_dir() && dir.join("runs/r1").is_dir());
+        // the saved profile (character and cosmetics) survives the update
+        assert_eq!(fs::read_to_string(dir.join("runtime/local-account/cosmetics.json")).unwrap(), "{\"outfit\":7}");
+        assert!(dir.join("reports/w19.zip").is_file());
         assert!(!dir.join("stale.txt").exists());
         assert_eq!(fs::read_to_string(dir.join("requirements.txt")).unwrap(), "new");
         assert!(!tmp.path().join("server.old").exists() && !fresh.exists());

@@ -125,6 +125,54 @@ impl Ports {
     }
 }
 
+/// A session folder made by windows_launch.py: `20261018T182630-5f7d2a`.
+fn is_session_folder(name: &str) -> bool {
+    let Some((stamp, id)) = name.split_once('-') else { return false };
+    let b = stamp.as_bytes();
+    b.len() == 15 && b[8] == b'T' && b.iter().enumerate().all(|(i, c)| i == 8 || c.is_ascii_digit()) && !id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Deletes the oldest session folders in `<server>/runs`, keeping the newest `keep` (0 = keep all).
+/// Only folders named like sessions are touched. Returns (folders removed, bytes freed).
+/// Call it only while no server runs: the newest folder may belong to a live session.
+pub fn prune_runs(dir: &Path, keep: usize) -> Result<(usize, u64)> {
+    if keep == 0 {
+        return Ok((0, 0));
+    }
+    let Ok(rd) = fs::read_dir(dir.join("runs")) else { return Ok((0, 0)) };
+    let mut sessions: Vec<PathBuf> = rd
+        .flatten()
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter(|e| is_session_folder(&e.file_name().to_string_lossy()))
+        .map(|e| e.path())
+        .collect();
+    // the names start with the date and time, so the name order is the age order
+    sessions.sort();
+    let excess = sessions.len().saturating_sub(keep);
+    let (mut removed, mut freed) = (0, 0u64);
+    for p in sessions.into_iter().take(excess) {
+        let size = folder_size(&p);
+        if fs::remove_dir_all(&p).is_ok() {
+            removed += 1;
+            freed += size;
+        }
+    }
+    Ok((removed, freed))
+}
+
+fn folder_size(p: &Path) -> u64 {
+    fs::read_dir(p)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| match e.file_type() {
+                    Ok(t) if t.is_dir() => folder_size(&e.path()),
+                    _ => e.metadata().map(|m| m.len()).unwrap_or(0),
+                })
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
 pub fn ports() -> Ports {
     Ports { lobby: listening_tcp(LOBBY_PORT), proxy: listening_tcp(PROXY_PORT), udp: bound_udp(UDP_PORT) }
 }
@@ -132,6 +180,26 @@ pub fn ports() -> Ports {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prunes_only_the_oldest_session_folders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let runs = tmp.path().join("runs");
+        let names = ["20261016T101010-aa11", "20261018T111614-a92f08", "20261017T090000-bb22", "20261019T005158-97d66a"];
+        for n in names {
+            fs::create_dir_all(runs.join(n).join("lobby")).unwrap();
+            fs::write(runs.join(n).join("lobby/events.jsonl"), vec![b'x'; 100]).unwrap();
+        }
+        fs::create_dir_all(runs.join("my-notes")).unwrap(); // not a session: never touched
+        fs::write(runs.join("20261001T000000-cc33.txt"), "").unwrap(); // a file, not a folder
+        assert_eq!(prune_runs(tmp.path(), 0).unwrap(), (0, 0));
+        assert_eq!(prune_runs(tmp.path(), 2).unwrap(), (2, 200));
+        let mut left: Vec<String> = fs::read_dir(&runs).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        left.sort();
+        assert_eq!(left, ["20261001T000000-cc33.txt", "20261018T111614-a92f08", "20261019T005158-97d66a", "my-notes"]);
+        assert_eq!(prune_runs(tmp.path(), 5).unwrap(), (0, 0));
+        assert!(!is_session_folder("20261018-x") && !is_session_folder("2026101XT111614-a9") && is_session_folder("20261018T111614-a92f08"));
+    }
 
     #[test]
     fn accepts_run_roe_cmd_style_switches() {

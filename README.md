@@ -54,7 +54,7 @@ The first start downloads what the server needs (a few hundred MB), then startup
 | **Server status** | Live indicators for the lobby (TCP 9001), proxy (TCP 8001) and endpoint (UDP 18001), uptime, pid, and the server's own output. A server you started yourself is detected and left alone. |
 | **Game location** | Found automatically in your Steam libraries, including libraries on other drives (Linux: `libraryfolders.vdf` of native or Flatpak Steam; Windows: Steam's registry entry). You can always browse or paste a path. The `Europa_Client.exe` hash is checked against the supported 2022 build. |
 | **Proton** *(Linux)* | Reads Steam's compatibility tools: GE-Proton, Proton-CachyOS, Proton-EM, UMU-Proton, Valve's Proton, anything with a `proton` script. Choose a fixed version, *"always the newest GE-Proton / CachyOS / …"*, or any custom folder. |
-| **Server updates** | Keeps its own copy of the server files and updates it from GitHub (exact-commit download; keeps the Python/.NET tools and run logs). Optionally re-applies the bundled **English translation** after every update. |
+| **Server updates** | Keeps its own copy of the server files and updates it from GitHub (exact-commit download; keeps your saved profiles, the Python/.NET tools, run logs and reports). Optionally re-applies the bundled **English translation** after every update. |
 | **Launcher updates** | Checks this project's releases at start. *Update now* downloads the package for your system, installs it only if it matches the release's SHA-256 file and replaces the launcher in place; *Restart now* opens the new version (not while the game or server runs). |
 | **Server Browser** *(preview)* | Your local server, servers you save, launchers found on your network and an optional online list, with search, filters and favourites. Only the local server can be joined for now (see [Known limitations](#known-limitations)). |
 | **Look** | Ring of Elysium styling (logo, tab headers, PLAY button font). 4 colour themes, your own accent and text colours, 4 bundled backgrounds or your own images, darkening, panel opacity, interface size, and falling snow or a sandstorm. |
@@ -80,10 +80,16 @@ The first start downloads what the server needs (a few hundred MB), then startup
 | Settings | `~/.config/roe-local/launcher.toml` | `%APPDATA%\roe-local\launcher.toml` |
 | Server files (changeable) | `~/.local/share/roe-local/server` | `%LOCALAPPDATA%\roe-local\server` |
 | Python / .NET for the server | `server/.tools/` | `server\.tools\` (same layout as upstream's `play.cmd`, so both can share it) |
+| Saved profiles (character, cosmetics) | `server/runtime/local-account/` (named: `local-accounts/NAME/`) | `server\runtime\local-account\` |
 | Run logs of every session | `server/runs/` | `server\runs\` |
 | Launcher log (and crash reports) | `~/.local/share/roe-local/launcher.log` | `%LOCALAPPDATA%\roe-local\launcher.log` |
 | Your backgrounds | `~/.local/share/roe-local/backgrounds` | `%LOCALAPPDATA%\roe-local\backgrounds` |
 | Wine prefix | the game's own Steam prefix, otherwise `~/.local/share/roe-local/prefix` | — (not needed) |
+
+Each server start creates a new session folder in `runs/` with that session's settings and logs; that's how the
+server works, not a reset of your player. Only the newest 20 are kept (Server Settings > Session > *Keep session
+logs*, 0 = keep all); older ones are deleted when the launcher starts. Your **profile** (the character and
+cosmetics you choose in the lobby) is the only thing the server saves between sessions, and updates keep it.
 
 Added background images are **copied** into the launcher's folder, so moving or deleting the original changes
 nothing. That folder is deliberately outside the server folder, because server updates replace the server folder.
@@ -94,7 +100,9 @@ On Linux the launcher also imports the answers saved by the old `play-roe.sh` sc
 **Server files** (Updates page):
 1. The latest commit is read from GitHub's public Atom feed, falling back to the REST API and finally to git's
    smart-HTTP refs, so a rate limit never blocks you.
-2. The exact commit is downloaded as an archive (no `git` needed) and swapped in; `.tools/` and `runs/` are kept.
+2. The exact commit is downloaded as an archive (no `git` needed) and swapped in. Your data is kept: `runtime/`
+   (saved profiles: the character and cosmetics you pick in the lobby), `runs/` (session logs), `reports/` and
+   `.tools/` (Python/.NET).
 3. If enabled, the built-in translator rewrites Russian comments and messages to English. New upstream text that
    isn't in its dictionary stays Russian and is counted on the Updates page.
 

@@ -542,7 +542,7 @@ impl App {
                     open_path(&dir.join("runs"));
                 }
             });
-            ui.label(RichText::new("This folder belongs to the launcher: an update replaces everything in it except .tools and runs. Do not point it at a checkout you edit by hand (git checkouts are refused).").size(12.5).color(pal.muted));
+            ui.label(RichText::new("This folder belongs to the launcher: an update replaces everything in it except your data (.tools, runs, runtime with your saved profiles, reports). Do not point it at a checkout you edit by hand (git checkouts are refused).").size(12.5).color(pal.muted));
         });
         ui.add_space(10.0);
         card(ui, pal, op, |ui| self.match_options(ui, pal));
@@ -551,6 +551,10 @@ impl App {
             ui.label(RichText::new("Session").strong());
             form_row_w(ui, "Session length (seconds)", 200.0, |ui| {
                 ui.add(egui::Slider::new(&mut self.cfg.server_duration, 120..=7200));
+            });
+            form_row_w(ui, "Keep session logs", 200.0, |ui| {
+                ui.add(egui::DragValue::new(&mut self.cfg.keep_runs).range(0..=1000).suffix(" newest"));
+                muted(ui, pal, if self.cfg.keep_runs == 0 { "keeping all".to_string() } else { "older ones are deleted when the launcher starts (0 = keep all)".to_string() });
             });
             ui.label("Extra arguments for windows_launch.py (anything not listed above)");
             ui.add(egui::TextEdit::singleline(&mut self.cfg.server_extra_args).desired_width(f32::INFINITY).hint_text("e.g. --practice-targets 10 --live-control"));
