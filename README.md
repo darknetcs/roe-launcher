@@ -119,6 +119,35 @@ the next start.
 
 HTTPS uses the **system certificate store**, so corporate proxies and custom CAs work.
 
+## Playing from Steam's Play button (Linux)
+
+The launcher is the easy way to play, but you can also start the game from Steam (for its overlay or playtime
+tracking). Start the server first (**Play Locally → Start server only**), then set the game's launch options in
+Steam (**Ring of Elysium → Properties → General → Launch options**) to this single line:
+
+```sh
+sh -c 'for a; do shift; case "$a" in -maintenance|-steam) ;; *) set -- "$@" "$a";; esac; done; exec "$@"' sh %command% -language=en -garena -uid=1 -server=127.0.0.1:8001
+```
+
+**Why it's needed:** since the official shutdown, Steam starts the game with `-steam -maintenance`, and you can't
+remove those from Steam's settings. `-maintenance` makes the game treat the servers as closed for maintenance, so
+it never tries to connect to any server, including a community one. The line above passes everything else through
+unchanged, drops those two switches, and adds the address of your local server. Steam's loader then starts the
+supported DirectX 9 client by itself (the in-game DX12 option is greyed out, as it should be).
+
+**Why the launcher is still the better choice:**
+- **Servers:** the address is written into the launch options by hand, so every other server means editing
+  Steam's settings. The launcher fills it in for you, and the Server Browser will do the same for other servers
+  when they can be joined.
+- **Everything else:** the launcher also starts and stops the server with the game, applies your **Player name**
+  and checks that you have the supported game build.
+
+A server started on its own stops when its session length runs out (Server Settings, default 25 minutes), even in
+the middle of a match, so raise it for long sessions.
+
+**Linux only:** this tip is for the Linux Steam client and has not been tested on Windows. On Windows, play through
+the launcher.
+
 ## Known limitations
 
 * **Only Training is implemented** by the community server; other game modes don't exist yet.
