@@ -282,6 +282,17 @@ impl App {
                     let (st, col) = self.server_badge(pal);
                     status_line(ui, col, st);
                     muted(ui, pal, "Status");
+                    ui.add_space(10.0);
+                    // community and source links
+                    ui.horizontal(|ui| {
+                        let w = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+                        if ui.add_sized([w, 30.0], egui::Button::new("Discord")).on_hover_text(crate::app::DISCORD_INVITE).clicked() {
+                            ui.ctx().open_url(egui::OpenUrl::new_tab(crate::app::DISCORD_INVITE));
+                        }
+                        if ui.add_sized([w, 30.0], egui::Button::new("GitHub")).on_hover_text(crate::app::GITHUB_URL).clicked() {
+                            ui.ctx().open_url(egui::OpenUrl::new_tab(crate::app::GITHUB_URL));
+                        }
+                    });
                 });
             });
     }
@@ -943,6 +954,25 @@ impl App {
         }
     }
 
+    fn discord_card(&mut self, ui: &mut Ui, pal: &Palette) {
+        ui.label(RichText::new("Discord").strong());
+        let configured = crate::app::discord_app_id().is_some();
+        ui.add_enabled(configured, egui::Checkbox::new(&mut self.cfg.discord_presence, "Show what I'm doing on Discord (Rich Presence)"));
+        muted(ui, pal, "Friends see \"Playing Ring of Elysium\" with what you are doing (in the launcher, hosting a server, in a match) and a link to the community. Only while Discord runs on this computer.");
+        ui.label(RichText::new("Not showing? In Discord: User Settings > Activity Privacy > \"Share your detected activities with others\" must be on.").size(12.5).color(pal.muted));
+        if !configured {
+            ui.colored_label(pal.warn, "Not set up in this build yet.");
+        } else if self.cfg.discord_presence {
+            let s = self.presence_status.lock().unwrap().clone();
+            let (c, t) = match s.as_str() {
+                "connected to Discord" => (pal.good, "Connected to Discord".to_string()),
+                "" => (pal.muted, "Connecting…".to_string()),
+                other => (pal.warn, other.to_string()),
+            };
+            status_line(ui, c, t);
+        }
+    }
+
     fn launcher_update_card(&mut self, ui: &mut Ui, pal: &Palette) {
         use roe_core::selfupdate;
         ui.label(RichText::new("Launcher").strong());
@@ -1046,6 +1076,9 @@ impl App {
                 ui.selectable_value(fx, Effect::Sandstorm, "Sandstorm");
             });
         });
+        ui.add_space(10.0);
+
+        card(ui, pal, op, |ui| self.discord_card(ui, pal));
         ui.add_space(10.0);
 
         let mut choose: Option<Background> = None;

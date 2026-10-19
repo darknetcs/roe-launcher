@@ -142,6 +142,8 @@ pub struct Config {
     pub lan_visible: bool,
     /// The name other launchers see; empty = a default.
     pub lan_name: String,
+    /// Discord Rich Presence ("Playing Ring of Elysium"); off until the player switches it on.
+    pub discord_presence: bool,
     pub theme: Theme,
 }
 
@@ -170,6 +172,7 @@ impl Default for Config {
             lan_search: true,
             lan_visible: false,
             lan_name: String::new(),
+            discord_presence: false,
             theme: Theme::default(),
         }
     }
@@ -185,12 +188,19 @@ impl Config {
     }
 
     pub fn load_from(dir: &Path) -> Config {
-        if let Ok(text) = fs::read_to_string(dir.join("launcher.toml")) {
-            if let Ok(mut c) = toml::from_str::<Config>(&text) {
-                if std::mem::take(&mut c.theme.snow) && c.theme.effect == Effect::Off {
-                    c.theme.effect = Effect::Snow;
+        let path = dir.join("launcher.toml");
+        if let Ok(text) = fs::read_to_string(&path) {
+            match toml::from_str::<Config>(&text) {
+                Ok(mut c) => {
+                    if std::mem::take(&mut c.theme.snow) && c.theme.effect == Effect::Off {
+                        c.theme.effect = Effect::Snow;
+                    }
+                    return c;
                 }
-                return c;
+                // unreadable (e.g. edited by hand): keep it, because the defaults are autosaved over it soon
+                Err(_) => {
+                    let _ = fs::copy(&path, dir.join("launcher.toml.broken"));
+                }
             }
         }
         Self::import_legacy(&dir.join("config")).unwrap_or_default()
@@ -351,6 +361,16 @@ mod tests {
         let text = fs::read_to_string(tmp.path().join("launcher.toml")).unwrap();
         assert!(text.contains("effect = \"Snow\"") && !text.contains("snow ="), "{text}");
         assert_eq!(Config::load_from(tmp.path()).theme.effect, Effect::Snow);
+    }
+
+    #[test]
+    fn a_broken_file_is_kept_before_the_defaults_replace_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let broken = "discord_presence = true\ndiscord_presence = false\n"; // a key twice: invalid TOML
+        fs::write(tmp.path().join("launcher.toml"), broken).unwrap();
+        let c = Config::load_from(tmp.path());
+        assert!(!c.discord_presence);
+        assert_eq!(fs::read_to_string(tmp.path().join("launcher.toml.broken")).unwrap(), broken);
     }
 
     #[test]

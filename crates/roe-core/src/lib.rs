@@ -4,6 +4,7 @@
 pub mod backgrounds;
 pub mod client;
 pub mod config;
+pub mod discord;
 pub mod game;
 pub mod lan;
 pub mod options;

@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::assets;
+use roe_core::discord::{Activity, Presence};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -28,6 +29,16 @@ pub enum Page {
     Appearance,
     Logs,
     ServerBrowser,
+}
+
+/// The Discord application behind Rich Presence (its name is what friends see as "Playing ..."; its art asset
+/// `logo` is the picture). Empty = not set up in this build; `ROE_DISCORD_APP_ID` overrides it for testing.
+pub const DISCORD_APP_ID: &str = "1561730386373902366";
+pub const DISCORD_INVITE: &str = "https://discord.gg/p9vHf4T2D";
+pub const GITHUB_URL: &str = "https://github.com/darknetcs/roe-launcher";
+
+pub fn discord_app_id() -> Option<String> {
+    std::env::var("ROE_DISCORD_APP_ID").ok().filter(|s| !s.trim().is_empty()).or_else(|| (!DISCORD_APP_ID.is_empty()).then(|| DISCORD_APP_ID.to_string()))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -169,6 +180,10 @@ pub struct App {
     /// Previews already asked for (made, failed or on their way), so each is decoded once.
     thumbs_requested: HashSet<Background>,
     pub custom_bgs: Vec<String>,
+    /// Discord Rich Presence worker (only while switched on) and its last connection status.
+    presence: Option<Presence>,
+    pub presence_status: Arc<Mutex<String>>,
+    last_presence: Instant,
     /// "Install with Steam": how Steam was asked (or why it could not be), and since when we wait.
     pub steam_install: Option<Result<String, String>>,
     pub install_wait: Option<Instant>,
@@ -241,6 +256,9 @@ impl App {
             thumbs: HashMap::new(),
             thumbs_requested: HashSet::new(),
             custom_bgs: backgrounds::list(&backgrounds::dir()),
+            presence: None,
+            presence_status: Arc::new(Mutex::new(String::new())),
+            last_presence: Instant::now() - Duration::from_secs(10),
             steam_install: None,
             install_wait: None,
             last_install_check: Instant::now(),
@@ -441,6 +459,65 @@ impl App {
             }
         }
         self.game_input = self.cfg.game_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+    }
+
+    /// What Discord shows for what the launcher is doing now.
+    fn activity(&self) -> Activity {
+        let targets = self.cfg.server_options.get("--practice-targets").filter(|n| !n.is_empty());
+        let (details, state, started) = if let Some(h) = self.client.as_ref().filter(|h| h.is_running()) {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let state = match targets {
+                Some(n) => format!("{n} practice targets"),
+                None => "On a local server".into(),
+            };
+            ("Training match".to_string(), state, Some(now.saturating_sub(h.started.elapsed().as_secs())))
+        } else if self.server_running() {
+            ("Hosting a local server".to_string(), String::new(), None)
+        } else {
+            let state = if self.game_ok() { "Ready to play" } else { "Setting up" };
+            ("In the launcher".to_string(), state.to_string(), None)
+        };
+        Activity {
+            details,
+            state,
+            started,
+            large_image: Some("logo".into()),
+            large_text: Some("Ring of Elysium — Local Launcher".into()),
+            buttons: vec![("Join the Discord".into(), DISCORD_INVITE.into()), ("Get the launcher".into(), GITHUB_URL.into())],
+        }
+    }
+
+    /// Starts, updates or stops Rich Presence to match the setting (every 2 s; the worker sends changes only).
+    fn sync_presence(&mut self) {
+        if self.last_presence.elapsed() < Duration::from_secs(2) {
+            return;
+        }
+        self.last_presence = Instant::now();
+        match (self.cfg.discord_presence, discord_app_id()) {
+            (true, Some(id)) => {
+                if self.presence.is_none() {
+                    let shared = self.presence_status.clone();
+                    let sink = self.sink(Src::Launcher);
+                    self.presence = Some(Presence::start(
+                        id,
+                        Arc::new(move |s: String| {
+                            sink(format!("Discord: {s}"));
+                            *shared.lock().unwrap() = s;
+                        }),
+                    ));
+                }
+                let a = self.activity();
+                if let Some(p) = &self.presence {
+                    p.set(Some(a));
+                }
+            }
+            _ => {
+                // dropping the worker clears the presence in Discord
+                if self.presence.take().is_some() {
+                    self.presence_status.lock().unwrap().clear();
+                }
+            }
+        }
     }
 
     /// Asks Steam to install the game; `tick` then looks for it every few seconds.
@@ -982,6 +1059,8 @@ impl App {
             }
         }
         self.client_was_running = running;
+
+        self.sync_presence();
 
         // No game yet (or Steam installing it): look every 5 s, so an install started here, in Steam or
         // before the launcher opened is noticed, and PLAY appears once Steam reports it complete

@@ -62,6 +62,7 @@ The first start downloads what the server needs (a few hundred MB), then startup
 | **Server updates** | Keeps its own copy of the server files and updates it from GitHub (exact-commit download; keeps your saved profiles, the Python/.NET tools, run logs and reports). Optionally re-applies the bundled **English translation** after every update. |
 | **Launcher updates** | Checks this project's releases at start. *Update now* downloads the package for your system, installs it only if it matches the release's SHA-256 file and replaces the launcher in place; *Restart now* opens the new version (not while the game or server runs). |
 | **Server Browser** *(preview)* | Your local server, servers you save, launchers found on your network and an optional online list, with search, filters and favourites. Only the local server can be joined for now (see [Known limitations](#known-limitations)). |
+| **Discord** | *Discord* and *GitHub* buttons in the sidebar. Optional **Rich Presence** (Appearance → Discord, off by default): friends see "Playing Ring of Elysium" and whether you're in the launcher, hosting a server or in a match, with links to the community and the launcher. Works with the regular, Flatpak and Snap Discord apps, and only while Discord runs on your computer. |
 | **Look** | Ring of Elysium styling (logo, tab headers, PLAY button font). 4 colour themes, your own accent and text colours, 4 bundled backgrounds or your own images, darkening, panel opacity, interface size, and falling snow or a sandstorm. |
 
 ## Requirements
@@ -157,7 +158,8 @@ their checksums to the release.
 
 Development switches: `ROE_START_PAGE=server|game|updates|appearance|logs|browser`, `ROE_AUTORUN=update|server|play`,
 `ROE_SCREENSHOT=<file.png>` (save the window after start-up, then close), `ROE_PRETEND_NO_GAME=1` (act as if the
-game is not installed, to try *Install via Steam*; settings are not changed).
+game is not installed, to try *Install via Steam*; settings are not changed), `ROE_DISCORD_APP_ID=<id>` (Rich
+Presence with another Discord application).
 
 **Server Browser internals:** `roe-core/src/servers.rs` holds the entry model, merging, favourites-first
 filtering, `host:port` validation and a proposed online-list format `{"servers":[...]}` (no such list exists yet;

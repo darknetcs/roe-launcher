@@ -2719,7 +2719,7 @@ dependencies = [
 
 [[package]]
 name = "roe-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "dirs",
@@ -2738,7 +2738,7 @@ dependencies = [
 
 [[package]]
 name = "roe-launcher"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "eframe",
