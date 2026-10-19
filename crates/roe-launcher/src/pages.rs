@@ -171,13 +171,18 @@ fn status_line(ui: &mut Ui, color: Color32, text: impl Into<String>) {
 impl App {
     pub fn ui(&mut self, ctx: &egui::Context) {
         let pal = theme::palette(&self.cfg.theme.preset, self.cfg.theme.accent, self.cfg.theme.text_color);
-        theme::apply(ctx, &pal, self.cfg.theme.ui_scale);
+        theme::apply(ctx, &pal, self.cfg.theme.ui_scale, self.handheld_active());
         self.paint_background(ctx, &pal);
         self.sidebar(ctx, &pal);
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(Color32::TRANSPARENT).inner_margin(Margin::symmetric(26, 18)))
             .show(ctx, |ui| {
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match self.page {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    // a scroll request only reaches a ScrollArea while its content is drawn
+                    if let Some(rect) = self.hh.scroll_to.take() {
+                        ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                    }
+                    match self.page {
                     Page::Play => self.page_play(ui, &pal),
                     Page::Server => self.page_server(ui, &pal),
                     Page::Game => self.page_game(ui, &pal),
@@ -185,6 +190,7 @@ impl App {
                     Page::Appearance => self.page_appearance(ui, &pal),
                     Page::Logs => self.page_logs(ui, &pal),
                     Page::ServerBrowser => self.page_server_browser(ui, &pal),
+                    }
                 });
             });
     }
@@ -272,7 +278,13 @@ impl App {
                     let btn = egui::Button::new(RichText::new(label).size(16.0).color(if sel { pal.accent } else { pal.text }))
                         .fill(if sel { pal.accent.gamma_multiply(0.20) } else { Color32::TRANSPARENT })
                         .stroke(if sel { Stroke::new(1.0_f32, pal.accent.gamma_multiply(0.6)) } else { Stroke::NONE });
-                    if ui.add_sized([ui.available_width(), 40.0], btn).clicked() {
+                    let r = ui.add_sized([ui.available_width(), 40.0], btn);
+                    // LB / RB: focus follows the selected tab, so Right steps into the page
+                    if sel && self.hh.focus_tab {
+                        r.request_focus();
+                        self.hh.focus_tab = false;
+                    }
+                    if r.clicked() {
                         self.page = page;
                     }
                 }
@@ -377,10 +389,12 @@ impl App {
                     Src::Server => ("server", pal.good),
                     Src::Client => ("game", pal.warn),
                 };
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("{:>8}", tag.0)).monospace().color(tag.1));
-                    ui.label(RichText::new(head(t, 110)).monospace().color(pal.muted));
-                });
+                // one label per line: a horizontal row would be as tall as a button (40 px in handheld mode)
+                let mono = egui::FontId::monospace(13.0);
+                let mut job = egui::text::LayoutJob::default();
+                job.append(&format!("{:>8}  ", tag.0), 0.0, egui::TextFormat::simple(mono.clone(), tag.1));
+                job.append(&head(t, 110), 0.0, egui::TextFormat::simple(mono, pal.muted));
+                ui.label(job);
             }
         });
 
@@ -881,6 +895,54 @@ impl App {
         }
     }
 
+    fn handheld_card(&mut self, ui: &mut Ui, pal: &Palette) {
+        use roe_core::handheld::{self, HandheldMode};
+        ui.label(RichText::new("Handheld").strong());
+        muted(ui, pal, "For Steam Deck and other handhelds: controller navigation, larger buttons, full screen and the on-screen keyboard.");
+        form_row(ui, "Handheld mode", |ui| {
+            let m = &mut self.cfg.handheld;
+            ui.selectable_value(m, HandheldMode::Auto, "Auto");
+            ui.selectable_value(m, HandheldMode::On, "On");
+            ui.selectable_value(m, HandheldMode::Off, "Off");
+        });
+        let d = self.hh.detection.clone();
+        let found = match (&d.device, d.handheld) {
+            (Some(dev), _) => format!("Detected: {dev}{}", if d.game_mode { " (Game Mode)" } else { "" }),
+            (None, true) if d.game_mode => "Detected: Steam Game Mode (gamescope)".to_string(),
+            (None, true) => "Detected: a handheld system".to_string(),
+            (None, false) => "This looks like a desktop PC".to_string(),
+        };
+        let state = if self.handheld_active() { "on" } else { "off" };
+        status_line(ui, if self.handheld_active() { pal.good } else { pal.muted }, format!("{found}: handheld mode is {state}"));
+        match &self.hh.pad_name {
+            Some(n) => status_line(ui, pal.good, format!("Controller: {n}")),
+            None => status_line(ui, pal.muted, "No controller connected"),
+        }
+        muted(ui, pal, "Controller: D-pad / left stick move, A select, B back, LB / RB switch tabs, Start = PLAY, right stick scrolls.");
+        ui.add_space(4.0);
+        if cfg!(windows) {
+            muted(ui, pal, "To start it from Steam: Steam > Games > Add a Non-Steam Game to My Library > roe-launcher.exe.");
+        } else {
+            match handheld::add_to_steam_method() {
+                handheld::AddToSteam::Helper(_) => {
+                    if ui.button("Add to Steam").on_hover_text("Adds the launcher to your Steam library, so it can be started in Game Mode").clicked() {
+                        self.add_launcher_to_steam();
+                    }
+                }
+                handheld::AddToSteam::Manual => muted(ui, pal, "To start it from Steam (Game Mode): Steam > Games > Add a Non-Steam Game to My Library > choose roe-launcher."),
+            }
+        }
+        match &self.hh.steam_message {
+            Some(Ok(m)) => {
+                ui.colored_label(pal.good, m);
+            }
+            Some(Err(e)) => {
+                ui.colored_label(pal.bad, e);
+            }
+            None => {}
+        }
+    }
+
     fn launcher_update_card(&mut self, ui: &mut Ui, pal: &Palette) {
         use roe_core::selfupdate;
         ui.label(RichText::new("Launcher").strong());
@@ -984,6 +1046,9 @@ impl App {
                 ui.selectable_value(fx, Effect::Sandstorm, "Sandstorm");
             });
         });
+        ui.add_space(10.0);
+
+        card(ui, pal, op, |ui| self.handheld_card(ui, pal));
         ui.add_space(10.0);
 
         let mut choose: Option<Background> = None;

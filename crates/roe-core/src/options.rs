@@ -80,7 +80,8 @@ impl ServerOption {
     pub fn help_en(&self) -> String {
         let russian = self.help.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c));
         if !self.help.is_empty() && !russian {
-            return self.help.clone();
+            // the launcher's font has no arrow glyphs
+            return self.help.replace('→', "->").replace('←', "<-");
         }
         match self.flag.as_str() {
             "--practice-targets" => "Number of passive targets, 1..10; requires Target".into(),

@@ -64,7 +64,8 @@ pub fn palette(preset: &str, accent: [u8; 3], text_color: Option<[u8; 3]>) -> Pa
     }
 }
 
-pub fn apply(ctx: &egui::Context, p: &Palette, scale: f32) {
+/// `handheld`: larger buttons and spacing for touch screens and controllers.
+pub fn apply(ctx: &egui::Context, p: &Palette, scale: f32, handheld: bool) {
     let mut v = egui::Visuals::dark();
     v.panel_fill = p.panel;
     v.window_fill = p.panel;
@@ -94,8 +95,18 @@ pub fn apply(ctx: &egui::Context, p: &Palette, scale: f32) {
     }
     ctx.set_visuals(v);
     ctx.style_mut(|s| {
-        s.spacing.item_spacing = vec2(10.0, 9.0);
-        s.spacing.button_padding = vec2(14.0, 7.0);
+        if handheld {
+            s.spacing.item_spacing = vec2(12.0, 11.0);
+            s.spacing.button_padding = vec2(18.0, 11.0);
+            s.spacing.interact_size.y = 40.0;
+            // selectable text would be a focus stop for the controller (and loses focus); touch has no use for it
+            s.interaction.selectable_labels = false;
+        } else {
+            s.spacing.item_spacing = vec2(10.0, 9.0);
+            s.spacing.button_padding = vec2(14.0, 7.0);
+            s.spacing.interact_size.y = 18.0;
+            s.interaction.selectable_labels = true;
+        }
         s.text_styles.insert(egui::TextStyle::Heading, egui::FontId::proportional(26.0));
         s.text_styles.insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
         s.text_styles.insert(egui::TextStyle::Button, egui::FontId::proportional(15.0));

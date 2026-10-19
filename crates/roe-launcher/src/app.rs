@@ -8,6 +8,7 @@ use roe_core::proton::{self, Runtime};
 use roe_core::server::{self, Ports};
 use roe_core::servers::{self, ServerEntry, ServerSource};
 use roe_core::update::{self, InstallInfo, Remote};
+use roe_core::handheld;
 use roe_core::options::{self, ServerOption};
 use roe_core::selfupdate::{self, Release};
 use roe_core::{client, lan, runtime, steam, translate, Sink};
@@ -18,6 +19,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::assets;
+use crate::gamepad::{self, Pad};
+use crate::theme;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -28,6 +31,71 @@ pub enum Page {
     Appearance,
     Logs,
     ServerBrowser,
+}
+
+/// The tabs in sidebar order (LB / RB step through them).
+pub const PAGE_ORDER: [Page; 7] = [Page::Play, Page::ServerBrowser, Page::Server, Page::Game, Page::Updates, Page::Appearance, Page::Logs];
+
+/// Handheld mode: what was detected, the controller, and the developer test switches.
+pub struct Handheld {
+    pub detection: handheld::Detection,
+    pad: Option<Receiver<Pad>>,
+    pub pad_name: Option<String>,
+    /// The widget that had focus last frame (a change scrolls the new one into view).
+    last_focus: Option<egui::Id>,
+    /// A text field had focus last frame (A then opens the on-screen keyboard).
+    text_focus: bool,
+    pub steam_message: Option<Result<String, String>>,
+    /// LB / RB switched tabs: put focus on the new tab's sidebar button.
+    pub focus_tab: bool,
+    /// Where the newly focused widget is: the page's scroll area brings it into view.
+    pub scroll_to: Option<egui::Rect>,
+    /// `ROE_PAD_SCRIPT=down,down,accept`: presses played back, for testing without a controller.
+    script: VecDeque<Pad>,
+    script_wait: u32,
+    /// Frames left before the screenshot once the script is done (lets scrolling settle).
+    settle: u32,
+    /// `ROE_SCREENSHOT=<file.png>`: save the window to a file, then close.
+    screenshot: Option<PathBuf>,
+    screenshot_asked: bool,
+    frames: u64,
+}
+
+impl Handheld {
+    fn new(ctx: &egui::Context) -> Self {
+        let script = std::env::var("ROE_PAD_SCRIPT")
+            .unwrap_or_default()
+            .split(',')
+            .filter_map(|s| match s.trim() {
+                "up" => Some(Pad::Up),
+                "down" => Some(Pad::Down),
+                "left" => Some(Pad::Left),
+                "right" => Some(Pad::Right),
+                "accept" | "a" => Some(Pad::Accept),
+                "back" | "b" => Some(Pad::Back),
+                "lb" => Some(Pad::PrevTab),
+                "rb" => Some(Pad::NextTab),
+                "start" => Some(Pad::Start),
+                _ => None,
+            })
+            .collect();
+        Handheld {
+            detection: handheld::detect(),
+            pad: gamepad::start(ctx.clone()),
+            pad_name: None,
+            last_focus: None,
+            text_focus: false,
+            steam_message: None,
+            focus_tab: false,
+            scroll_to: None,
+            script,
+            script_wait: 30,
+            settle: 25,
+            screenshot: std::env::var_os("ROE_SCREENSHOT").map(PathBuf::from),
+            screenshot_asked: false,
+            frames: 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -170,6 +238,7 @@ pub struct App {
     thumbs_requested: HashSet<Background>,
     pub custom_bgs: Vec<String>,
     pub browser: Browser,
+    pub hh: Handheld,
     /// Running under Wine / Proton: work around what its Windows emulation lacks (see `wine_fixes`).
     wine: bool,
     #[cfg(windows)]
@@ -233,6 +302,7 @@ impl App {
             thumbs_requested: HashSet::new(),
             custom_bgs: backgrounds::list(&backgrounds::dir()),
             browser: Browser { instance: instance_id(), ..Default::default() },
+            hh: Handheld::new(&cc.egui_ctx),
             wine: roe_core::under_wine(),
             #[cfg(windows)]
             uia_blocked: false,
@@ -263,6 +333,11 @@ impl App {
         app.log(Src::Launcher, "Launcher started.".into());
         if app.wine {
             app.log(Src::Launcher, "Running under Wine/Proton: input methods (IME) and screen-reader support are off.".into());
+        }
+        let d = &app.hh.detection;
+        if d.handheld {
+            let what = d.device.clone().unwrap_or_else(|| "a handheld system".into());
+            app.log(Src::Launcher, format!("Detected {what}{}.", if d.game_mode { " in Game Mode" } else { "" }));
         }
         // development hook: ROE_AUTORUN=update|server|play
         match std::env::var("ROE_AUTORUN").as_deref() {
@@ -726,6 +801,136 @@ impl App {
         });
     }
 
+    // ---------- handheld mode ----------
+    pub fn handheld_active(&self) -> bool {
+        handheld::active(self.cfg.handheld, &self.hh.detection)
+    }
+
+    /// Controller actions become the key presses egui knows: arrows move focus (Tab first, when
+    /// nothing has focus yet), Enter clicks, Escape closes; LB/RB switch tabs, Start plays.
+    fn handle_pad(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let mut actions: Vec<Pad> = self.hh.pad.as_ref().map(|rx| rx.try_iter().collect()).unwrap_or_default();
+        if !self.hh.script.is_empty() {
+            ctx.request_repaint();
+            if self.hh.script_wait == 0 {
+                actions.extend(self.hh.script.pop_front());
+                self.hh.script_wait = 8;
+            } else {
+                self.hh.script_wait -= 1;
+            }
+        }
+        for a in actions {
+            match a {
+                Pad::Connected(name) => {
+                    self.log(Src::Launcher, format!("Controller connected: {name}"));
+                    self.hh.pad_name = Some(name);
+                }
+                Pad::PrevTab | Pad::NextTab => {
+                    let i = PAGE_ORDER.iter().position(|p| *p == self.page).unwrap_or(0) as i64;
+                    let n = PAGE_ORDER.len() as i64;
+                    let step = if a == Pad::NextTab { 1 } else { -1 };
+                    self.page = PAGE_ORDER[(i + step).rem_euclid(n) as usize];
+                    self.hh.focus_tab = true;
+                }
+                Pad::Start => {
+                    if self.page == Page::Play && self.play_blockers().is_empty() && !self.busy() && !self.client_running() {
+                        self.start_flow(true);
+                    } else {
+                        self.page = Page::Play;
+                    }
+                }
+                Pad::Scroll(dy) => {
+                    // a wheel scrolls what is under the pointer: without a mouse, aim at the page
+                    if ctx.input(|i| i.pointer.latest_pos().is_none()) {
+                        raw.events.push(egui::Event::PointerMoved(ctx.screen_rect().center()));
+                    }
+                    raw.events.push(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -dy), modifiers: Default::default() });
+                }
+                // A on a text field: type with the on-screen keyboard (passing over a field with the
+                // D-pad must not pop it up)
+                Pad::Accept if self.hh.text_focus => {
+                    if handheld::open_on_screen_keyboard(self.hh.detection.game_mode) {
+                        self.log(Src::Launcher, "Opened the on-screen keyboard.".into());
+                    }
+                }
+                _ => {
+                    let nothing_focused = ctx.memory(|m| m.focused()).is_none();
+                    let key = match a {
+                        Pad::Up | Pad::Down | Pad::Left | Pad::Right if nothing_focused => Some(egui::Key::Tab),
+                        _ => gamepad::key_for(&a),
+                    };
+                    if let Some(key) = key {
+                        for pressed in [true, false] {
+                            raw.events.push(egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: Default::default() });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Before the frame: when focus moved (it moves at the end of the previous frame), scroll the new
+    /// widget into view. This must happen before the page is drawn: egui clears scroll requests per frame.
+    fn handheld_before_frame(&mut self, ctx: &egui::Context) {
+        let focused = ctx.memory(|m| m.focused());
+        if focused != self.hh.last_focus {
+            if let Some(r) = focused.and_then(|id| ctx.read_response(id)) {
+                self.hh.scroll_to = Some(r.rect);
+                ctx.request_repaint();
+            }
+            self.hh.last_focus = focused;
+        }
+    }
+
+    /// After the frame: ring around the focused widget; note whether a text field has focus.
+    fn handheld_after_frame(&mut self, ctx: &egui::Context, pal: &theme::Palette) {
+        let focused = ctx.memory(|m| m.focused());
+        if let Some(r) = focused.and_then(|id| ctx.read_response(id)) {
+            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("focus-ring")));
+            painter.rect_stroke(r.rect.expand(3.0), 8.0, egui::Stroke::new(3.0_f32, pal.accent), egui::StrokeKind::Outside);
+        }
+        self.hh.text_focus = ctx.output(|o| o.ime.is_some());
+    }
+
+    pub fn add_launcher_to_steam(&mut self) {
+        let Some(exe) = self.exe.clone() else { return };
+        self.hh.steam_message = Some(match handheld::add_to_steam(&exe) {
+            Ok(()) => Ok("Added to Steam. It appears in the library (in Game Mode after Steam restarts).".into()),
+            Err(e) => Err(format!("{e:#}")),
+        });
+    }
+
+    /// `ROE_SCREENSHOT`: ask for a screenshot once start-up (and any test script) is done.
+    fn screenshot_step(&mut self, ctx: &egui::Context) {
+        self.hh.frames += 1;
+        if self.hh.script.is_empty() && self.hh.settle > 0 {
+            self.hh.settle -= 1;
+        }
+        if self.hh.screenshot.is_some() && !self.hh.screenshot_asked && self.hh.frames > 90 && self.hh.script.is_empty() && self.hh.settle == 0 {
+            self.hh.screenshot_asked = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+        }
+        if self.hh.screenshot.is_some() {
+            ctx.request_repaint();
+        }
+    }
+
+    fn save_screenshot(&mut self, ctx: &egui::Context, raw: &egui::RawInput) {
+        let Some(path) = self.hh.screenshot.clone() else { return };
+        for ev in &raw.events {
+            if let egui::Event::Screenshot { image, .. } = ev {
+                let bytes: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
+                if let Some(img) = image::RgbaImage::from_raw(image.width() as u32, image.height() as u32, bytes) {
+                    match img.save(&path) {
+                        Ok(()) => self.log(Src::Launcher, format!("Screenshot saved to {}", path.display())),
+                        Err(e) => self.log(Src::Launcher, format!("Screenshot failed: {e}")),
+                    }
+                }
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+
     // ---------- the launcher's own updates ----------
     pub fn check_launcher(&mut self) {
         if self.launcher_checking {
@@ -1028,6 +1233,11 @@ fn tex(ctx: &egui::Context, name: &str, bytes: &[u8]) -> egui::TextureHandle {
 }
 
 impl eframe::App for App {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.handle_pad(ctx, raw_input);
+        self.save_screenshot(ctx, raw_input);
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         #[cfg(windows)]
         if self.wine && !self.uia_blocked {
@@ -1037,7 +1247,15 @@ impl eframe::App for App {
             }
         }
         self.tick(ctx);
+        if self.handheld_active() {
+            self.handheld_before_frame(ctx);
+        }
         self.ui(ctx);
+        if self.handheld_active() {
+            let pal = theme::palette(&self.cfg.theme.preset, self.cfg.theme.accent, self.cfg.theme.text_color);
+            self.handheld_after_frame(ctx, &pal);
+        }
+        self.screenshot_step(ctx);
         if self.wine {
             // without an IME request eframe never calls set_ime_allowed / set_ime_cursor_area
             ctx.output_mut(|o| o.ime = None);

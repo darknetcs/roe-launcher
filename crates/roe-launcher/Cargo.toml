@@ -14,6 +14,7 @@ eframe = { version = "0.31", default-features = true }
 rfd = "0.15"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 anyhow = "1"
+gilrs = "0.11"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

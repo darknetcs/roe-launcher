@@ -116,6 +116,8 @@ pub struct Config {
     pub check_updates_on_start: bool,
     /// Look for a newer launcher on GitHub when it starts.
     pub check_launcher_updates: bool,
+    /// Handheld mode (controller navigation, large layout): Auto / On / Off.
+    pub handheld: crate::handheld::HandheldMode,
     pub translate_after_update: bool,
     pub stop_server_on_game_exit: bool,
     pub proton_log: bool,
@@ -152,6 +154,7 @@ impl Default for Config {
             server_dir: None,
             check_updates_on_start: true,
             check_launcher_updates: true,
+            handheld: crate::handheld::HandheldMode::Auto,
             translate_after_update: true,
             stop_server_on_game_exit: true,
             proton_log: false,

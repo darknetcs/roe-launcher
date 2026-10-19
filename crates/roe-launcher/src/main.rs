@@ -3,6 +3,7 @@
 
 mod app;
 mod assets;
+mod gamepad;
 mod pages;
 mod theme;
 
@@ -23,8 +24,13 @@ fn log_panics() {
 
 fn main() -> eframe::Result {
     log_panics();
+    // a handheld (or Steam's Game Mode) gets the whole screen; a desktop with handheld mode "On" does not
+    let cfg = roe_core::config::Config::load();
+    let det = roe_core::handheld::detect();
+    let fullscreen = roe_core::handheld::active(cfg.handheld, &det) && (det.device.is_some() || det.game_mode);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            .with_fullscreen(fullscreen)
             .with_inner_size([1280.0, 720.0]) // 16:9, like the bundled backgrounds, so they are not cropped
             .with_min_inner_size([880.0, 580.0])
             .with_title("Ring of Elysium — Local Launcher")

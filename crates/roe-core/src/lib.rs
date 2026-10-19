@@ -5,6 +5,7 @@ pub mod backgrounds;
 pub mod client;
 pub mod config;
 pub mod game;
+pub mod handheld;
 pub mod lan;
 pub mod options;
 pub mod process;
