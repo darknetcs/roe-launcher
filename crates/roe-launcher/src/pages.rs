@@ -409,15 +409,21 @@ impl App {
                 let id_text = m.id.map(|i| format!("Map {i}")).unwrap_or_else(|| "Map ID unknown".into());
                 p.text(at + vec2(0.0, 24.0), egui::Align2::LEFT_TOP, id_text, egui::FontId::proportional(11.0), pal.muted);
                 p.text(at + vec2(0.0, 38.0), egui::Align2::LEFT_TOP, m.world, egui::FontId::proportional(11.0), pal.muted);
-                let (badge, colour, hint) = match m.support {
-                    Support::Supported => ("Training", pal.good, "Playable in Training on the community server."),
-                    Support::Experimental => (
+                let (badge, colour, hint) = match (m.support, m.id) {
+                    (Support::Supported, _) => ("Training", pal.good, "Playable in Training on the community server."),
+                    (Support::Experimental, Some(16007)) => (
                         "Experimental",
                         pal.warn,
-                        "The game loads this map, but the community server only has Dione's spawn points, loot, zones and \
-                         evacuation, so expect to spawn in odd places or fall. Untested.",
+                        "Loads and plays (moving, swimming), but the server still uses Dione's zones and evacuation: the \
+                         helicopter appears outside the final zone and too high to reach. For testing only.",
                     ),
-                    Support::Unknown => (
+                    (Support::Experimental, _) => (
+                        "Experimental",
+                        pal.warn,
+                        "The game has this map, but the community server only has Dione's spawn points, loot, zones and \
+                         evacuation, so expect odd spawns, missing loot or no way to extract. Untested.",
+                    ),
+                    (Support::Unknown, _) => (
                         "Needs server support",
                         pal.muted,
                         "The game has this map, but its map ID isn't known yet, so it can't be chosen.",

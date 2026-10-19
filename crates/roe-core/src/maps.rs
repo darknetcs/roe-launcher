@@ -1,7 +1,8 @@
 //! The game's maps and what the community server can do with them. The map is `profile.base.m644` in the
-//! server's recorded enter-room reply (applied by `playername::apply`). IDs come from ROE-LIVE's research notes
-//! (docs/BUILDS.md, "Steam table"); the world folders are the game's `Cache/Data/world/*`.
-//! Only Dione has server content (spawn points, loot, zones, evacuation are all hand-built for map 16010).
+//! server's recorded enter-room reply (applied by `playername::apply`). The IDs are the match ("PLANE") maps of the
+//! game's own map table (an XML in `SFC/TableBin.sfc`, `m_vecMapConfig`): 16010 Dione select-point start,
+//! 16011 Dione night mode, 16007 island (Kill Zone) select-point start, 16021..16024 Desert ("Gobi"; 16022 novice,
+//! 16023 practice). Only Dione has server content (spawn points, loot, zones, evacuation are hand-built for 16010).
 
 /// Upstream's map: Dione (winter).
 pub const DIONE: u32 = 16010;
@@ -28,8 +29,8 @@ pub struct Map {
 
 pub const MAPS: [Map; 4] = [
     Map { name: "Dione", world: "EU_IceLand_4096", id: Some(DIONE), support: Support::Supported },
-    Map { name: "Dione at night", world: "EU_IcelandNight_4096", id: None, support: Support::Unknown },
-    Map { name: "Desert", world: "EU_Desert_4096", id: None, support: Support::Unknown },
+    Map { name: "Dione at night", world: "EU_IcelandNight_4096", id: Some(16011), support: Support::Experimental },
+    Map { name: "Desert", world: "EU_Desert_4096", id: Some(16021), support: Support::Experimental },
     Map { name: "Kill Zone", world: "EU_Killzone_4096", id: Some(16007), support: Support::Experimental },
 ];
 
@@ -52,6 +53,8 @@ mod tests {
         assert_eq!(playable_id(DIONE), DIONE);
         assert_eq!(playable_id(16007), 16007);
         assert_eq!(by_id(16007).unwrap().support, Support::Experimental);
+        assert_eq!(playable_id(16011), 16011);
+        assert_eq!(playable_id(16021), 16021);
         // the dev test map, or anything else, falls back to Dione
         assert_eq!(playable_id(16005), DIONE);
         assert_eq!(playable_id(0), DIONE);
