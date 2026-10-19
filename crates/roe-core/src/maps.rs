@@ -14,8 +14,8 @@ pub enum Support {
     /// The game has it and its ID is known, but the server only has Dione's content: spawns, loot and zones will
     /// be Dione's. Selectable, at the player's risk.
     Experimental,
-    /// The game has it, but its map ID isn't known yet.
-    Unknown,
+    /// Tested and unplayable (e.g. the game hangs): shown, but can't be picked.
+    Broken,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -25,18 +25,60 @@ pub struct Map {
     pub world: &'static str,
     pub id: Option<u32>,
     pub support: Support,
+    /// Short status on the tile.
+    pub badge: &'static str,
+    /// What we know from testing (tooltip).
+    pub note: &'static str,
 }
 
+/// Ordered from working to most broken (owner's tests, 2026-10-19).
 pub const MAPS: [Map; 4] = [
-    Map { name: "Dione", world: "EU_IceLand_4096", id: Some(DIONE), support: Support::Supported },
-    Map { name: "Dione at night", world: "EU_IcelandNight_4096", id: Some(16011), support: Support::Experimental },
-    Map { name: "Desert", world: "EU_Desert_4096", id: Some(16021), support: Support::Experimental },
-    Map { name: "Kill Zone", world: "EU_Killzone_4096", id: Some(16007), support: Support::Experimental },
+    Map {
+        name: "Dione",
+        world: "EU_IceLand_4096",
+        id: Some(DIONE),
+        support: Support::Supported,
+        badge: "Training",
+        note: "Playable in Training on the community server.",
+    },
+    Map {
+        name: "Kill Zone",
+        world: "EU_Killzone_4096",
+        id: Some(16007),
+        support: Support::Experimental,
+        badge: "Plays · no extraction",
+        note: "Loads and plays (moving, swimming), but the server still uses Dione's zones and evacuation: the helicopter \
+               appears outside the final zone and too high to reach. For testing only.",
+    },
+    Map {
+        name: "Desert",
+        world: "EU_Desert_4096",
+        id: Some(16021),
+        support: Support::Experimental,
+        badge: "Untested",
+        note: "Not tried yet. The server only has Dione's spawn points, loot, zones and evacuation, and Desert is a \
+               smaller map, so expect odd spawns, missing loot or no way to extract.",
+    },
+    Map {
+        name: "Dione at night",
+        world: "EU_IcelandNight_4096",
+        id: Some(16011),
+        support: Support::Broken,
+        badge: "Hangs at match start",
+        note: "The night event map: the landing-point picker doesn't respond and the game freezes when the countdown \
+               ends. Needs server support for its event mode.",
+    },
 ];
 
 /// The map with this ID, if it is one the launcher may select.
 pub fn by_id(id: u32) -> Option<&'static Map> {
-    MAPS.iter().find(|m| m.id == Some(id) && m.support != Support::Unknown)
+    MAPS.iter().find(|m| m.id == Some(id) && m.selectable())
+}
+
+impl Map {
+    pub fn selectable(&self) -> bool {
+        matches!(self.support, Support::Supported | Support::Experimental)
+    }
 }
 
 /// The ID to put in the room reply: a saved choice that isn't selectable (any more) falls back to Dione.
@@ -53,8 +95,9 @@ mod tests {
         assert_eq!(playable_id(DIONE), DIONE);
         assert_eq!(playable_id(16007), 16007);
         assert_eq!(by_id(16007).unwrap().support, Support::Experimental);
-        assert_eq!(playable_id(16011), 16011);
         assert_eq!(playable_id(16021), 16021);
+        // night hangs the game: a saved choice falls back to Dione
+        assert_eq!(playable_id(16011), DIONE);
         // the dev test map, or anything else, falls back to Dione
         assert_eq!(playable_id(16005), DIONE);
         assert_eq!(playable_id(0), DIONE);

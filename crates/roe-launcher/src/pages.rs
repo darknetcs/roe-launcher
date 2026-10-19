@@ -380,8 +380,8 @@ impl App {
         }
     }
 
-    /// Map selector (see `roe_core::maps`). Supported and experimental maps can be picked; maps whose ID isn't
-    /// known are shown greyed out. Applied when the server starts, together with the player name.
+    /// Map selector (see `roe_core::maps`), ordered from working to most broken. Supported and experimental maps can
+    /// be picked; broken ones are shown greyed out with what went wrong. Applied when the server starts, together with the player name.
     fn map_card(&mut self, ui: &mut Ui, pal: &Palette) {
         use roe_core::maps::{self, Support};
         ui.label(RichText::new("Map").strong());
@@ -390,7 +390,7 @@ impl App {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
             for m in maps::MAPS {
-                let pickable = m.support != Support::Unknown;
+                let pickable = m.selectable();
                 let selected = m.id == Some(current);
                 let (rect, resp) = ui.allocate_exact_size(vec2(190.0, 104.0), if pickable { Sense::click() } else { Sense::hover() });
                 let p = ui.painter();
@@ -409,31 +409,18 @@ impl App {
                 let id_text = m.id.map(|i| format!("Map {i}")).unwrap_or_else(|| "Map ID unknown".into());
                 p.text(at + vec2(0.0, 24.0), egui::Align2::LEFT_TOP, id_text, egui::FontId::proportional(11.0), pal.muted);
                 p.text(at + vec2(0.0, 38.0), egui::Align2::LEFT_TOP, m.world, egui::FontId::proportional(11.0), pal.muted);
-                let (badge, colour, hint) = match (m.support, m.id) {
-                    (Support::Supported, _) => ("Training", pal.good, "Playable in Training on the community server."),
-                    (Support::Experimental, Some(16007)) => (
-                        "Experimental",
-                        pal.warn,
-                        "Loads and plays (moving, swimming), but the server still uses Dione's zones and evacuation: the \
-                         helicopter appears outside the final zone and too high to reach. For testing only.",
-                    ),
-                    (Support::Experimental, _) => (
-                        "Experimental",
-                        pal.warn,
-                        "The game has this map, but the community server only has Dione's spawn points, loot, zones and \
-                         evacuation, so expect odd spawns, missing loot or no way to extract. Untested.",
-                    ),
-                    (Support::Unknown, _) => (
-                        "Needs server support",
-                        pal.muted,
-                        "The game has this map, but its map ID isn't known yet, so it can't be chosen.",
-                    ),
+                let colour = match m.support {
+                    Support::Supported => pal.good,
+                    Support::Experimental => pal.warn,
+                    Support::Broken => pal.bad,
                 };
+                let (badge, hint) = (m.badge, m.note);
                 p.text(rect.left_bottom() + vec2(12.0, -12.0), egui::Align2::LEFT_BOTTOM, badge, egui::FontId::proportional(12.5), colour);
                 if selected {
                     p.text(rect.right_bottom() + vec2(-12.0, -12.0), egui::Align2::RIGHT_BOTTOM, "✔ Selected", egui::FontId::proportional(12.5), pal.accent);
                 }
-                if pickable && resp.on_hover_text(hint).clicked() {
+                let resp = resp.on_hover_text(hint);
+                if pickable && resp.clicked() {
                     self.cfg.map_id = m.id.unwrap_or(maps::DIONE);
                 }
             }
