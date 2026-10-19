@@ -63,7 +63,7 @@ The first start downloads what the server needs (a few hundred MB), then startup
 | **Launcher updates** | Checks this project's releases at start. *Update now* downloads the package for your system, installs it only if it matches the release's SHA-256 file and replaces the launcher in place; *Restart now* opens the new version (not while the game or server runs). |
 | **Server Browser** *(preview)* | Your local server, servers you save, launchers found on your network and an optional online list, with search, filters and favourites. Only the local server can be joined for now (see [Known limitations](#known-limitations)). |
 | **Discord** | *Discord* and *GitHub* buttons in the sidebar. Optional **Rich Presence** (Appearance → Discord, off by default): friends see "Playing Ring of Elysium" and whether you're in the launcher, hosting a server or in a match, with links to the community and the launcher. Works with the regular, Flatpak and Snap Discord apps, and only while Discord runs on your computer. |
-| **Look** | Ring of Elysium styling (logo, tab headers, PLAY button font). 4 colour themes, your own accent and text colours, 4 bundled backgrounds or your own images, darkening, panel opacity, interface size, and falling snow or a sandstorm. |
+| **Look** | Ring of Elysium styling (logo, and tab titles and PLAY in the *Gemina 2* font). 4 colour themes, your own accent and text colours, 4 bundled backgrounds or your own images, darkening, panel opacity, interface size, and falling snow or a sandstorm. |
 
 ## Requirements
 
@@ -171,10 +171,10 @@ networks, and only while its server runs.
 
 The code is MIT-licensed (`LICENSE`); contributions are welcome (`CONTRIBUTING.md`).
 
-`crates/roe-launcher/assets/` holds the Ring of Elysium logo, wordmark and four backgrounds (the game publisher's
-artwork) and tab headers in the wordmark's style (`assets/headers/`). None of them is covered by this project's
-licence; see `NOTICE.md`. The PLAY button uses the *Gemina 2* font by Iconian Fonts, free for non-commercial use
-(`assets/fonts/gemina2.txt`, shipped with every release). To build without them, replace those files (keep the
+`crates/roe-launcher/assets/` holds the Ring of Elysium logo and four backgrounds (the game publisher's artwork).
+They are not covered by this project's licence; see `NOTICE.md`. The tab titles and the PLAY button are drawn with
+the *Gemina 2* font by Iconian Fonts, free for non-commercial use (`assets/fonts/gemina2.txt`, shipped with every
+release). To build without them, replace those files (keep the
 names) or adjust `src/assets.rs`.
 
 ## Ideas / roadmap

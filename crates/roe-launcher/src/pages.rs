@@ -151,11 +151,62 @@ fn form_row_w(ui: &mut Ui, label: &str, label_w: f32, add: impl FnOnce(&mut Ui))
     });
 }
 
-/// Width the wordmark is drawn at on the Play page; the tab headers use the same scale.
-const WORDMARK_W: f32 = 500.0;
+/// Letter height of a tab title in points (what the old GIMP-made header images showed).
+const HEADER_LETTERS: f32 = 20.8;
+/// Gemina 2's letters are this share of the font size tall.
+const GEMINA_LETTER: f32 = 0.663;
+/// Extra space between letters, as a share of the font size (the old headers were set wider than the font).
+const HEADER_SPACING: f32 = 0.04;
 
-fn title(ui: &mut Ui, pal: &Palette, t: &str) {
-    ui.label(RichText::new(t).size(24.0).strong().color(pal.text));
+/// A tab title in the launcher's header style: the name in Gemina 2 between two accent-coloured triangles with a
+/// soft shadow. Gemina's lower-case letters are its clean small capitals, so the text is drawn in lower case.
+/// Drawn live (no images); it shrinks to fit a narrow window.
+fn header(ui: &mut Ui, pal: &Palette, text: &str) {
+    let family = egui::FontFamily::Name(assets::PLAY_FAMILY.into());
+    let layout = |size: f32| {
+        let mut job = egui::text::LayoutJob::default();
+        let format = egui::TextFormat { font_id: egui::FontId::new(size, family.clone()), color: pal.text, extra_letter_spacing: size * HEADER_SPACING, ..Default::default() };
+        job.append(&text.to_lowercase(), 0.0, format);
+        ui.fonts(|f| f.layout_job(job))
+    };
+    // triangle and gap sizes follow the letters: triangles a fifth taller, reaching a little below the baseline
+    let parts = |size: f32, text_w: f32| {
+        let letters = size * GEMINA_LETTER;
+        let (tri_h, gap) = (letters * 1.2, letters * 0.48);
+        let tri_w = tri_h * 1.155; // equilateral
+        (letters, tri_h, tri_w, gap, text_w + 2.0 * (tri_w + gap))
+    };
+    let mut size = HEADER_LETTERS / GEMINA_LETTER;
+    let mut galley = layout(size);
+    let text_w = |g: &std::sync::Arc<egui::Galley>| g.size().x;
+    let total = parts(size, text_w(&galley)).4;
+    if total > ui.available_width() {
+        size *= ui.available_width() / total;
+        galley = layout(size);
+    }
+    let (letters, tri_h, tri_w, gap, total) = parts(size, text_w(&galley));
+    let shadow = 3.0;
+    let (rect, _) = ui.allocate_exact_size(vec2(total + shadow, tri_h + shadow), Sense::hover());
+    let painter = ui.painter();
+    let baseline = rect.top() + tri_h - letters * 0.1;
+    // where the first letter's baseline sits inside the laid-out text
+    let galley_baseline = galley.rows.first().and_then(|r| r.glyphs.first()).map(|g| g.pos.y).unwrap_or(letters);
+    let triangle = |x: f32| {
+        let (top, bottom) = (rect.top(), rect.top() + tri_h);
+        for (off, alpha) in [(2.5, 40u8), (1.5, 70)] {
+            let pts = vec![pos2(x + off, bottom + off), pos2(x + tri_w + off, bottom + off), pos2(x + tri_w / 2.0 + off, top + off)];
+            painter.add(egui::Shape::convex_polygon(pts, Color32::from_black_alpha(alpha), Stroke::NONE));
+        }
+        let pts = vec![pos2(x, bottom), pos2(x + tri_w, bottom), pos2(x + tri_w / 2.0, top)];
+        painter.add(egui::Shape::convex_polygon(pts, pal.accent, Stroke::NONE));
+    };
+    triangle(rect.left());
+    // drawn three times within a point: as heavy as the GIMP-made headers (egui's text is lighter)
+    let at = pos2(rect.left() + tri_w + gap, baseline - galley_baseline);
+    for dx in [0.0, 0.45, 0.9] {
+        painter.galley(at + vec2(dx, 0.0), galley.clone(), pal.text);
+    }
+    triangle(rect.left() + total - tri_w);
 }
 
 fn muted(ui: &mut Ui, pal: &Palette, t: impl Into<String>) {
@@ -205,18 +256,9 @@ impl App {
         }
     }
 
-    /// The tab's picture header at the wordmark's scale (shrunk to fit), or a text title.
+    /// The tab's title, drawn live in the header style (see `header`).
     fn page_title(&self, ui: &mut Ui, pal: &Palette, text: &str) {
-        match self.headers.iter().find(|(p, _)| *p == self.page) {
-            Some((_, t)) => {
-                let mut size = t.size_vec2() * (WORDMARK_W / assets::NAME_WIDTH);
-                if size.x > ui.available_width() {
-                    size *= ui.available_width() / size.x;
-                }
-                ui.add(egui::Image::new((t.id(), size))).on_hover_text(text);
-            }
-            None => title(ui, pal, text),
-        }
+        header(ui, pal, text);
     }
 
     // ---------- derived state ----------
@@ -319,8 +361,7 @@ impl App {
 
     // ---------- Play ----------
     fn page_play(&mut self, ui: &mut Ui, pal: &Palette) {
-        let w = ui.available_width().min(WORDMARK_W);
-        ui.add(egui::Image::new((self.name_img.id(), vec2(w, w * assets::NAME_ASPECT))));
+        header(ui, pal, "Ring of Elysium");
         ui.add_space(2.0);
         ui.label(RichText::new("Local server launcher").size(16.0).color(pal.muted));
         ui.add_space(14.0);

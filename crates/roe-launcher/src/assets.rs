@@ -1,27 +1,9 @@
-//! Artwork embedded in the binary: the logo, the wordmark, the tab headers and the four bundled backgrounds.
+//! Artwork embedded in the binary: the logo, the Gemina 2 font (tab titles and PLAY) and the four bundled backgrounds.
 //! Everything lives in `crates/roe-launcher/assets/`; delete the files there (and the matching
 //! `include_bytes!` lines) to build a launcher without any game artwork.
 use eframe::egui;
 
 pub const LOGO: &[u8] = include_bytes!("../assets/logo.png");
-pub const NAME: &[u8] = include_bytes!("../assets/name.png");
-/// Aspect ratio (height / width) of the wordmark image.
-pub const NAME_ASPECT: f32 = 79.0 / 1200.0;
-/// Width of the wordmark image: every tab header was made at the same scale (80 px tall).
-pub const NAME_WIDTH: f32 = 1200.0;
-
-/// Tab headers in the wordmark's style: (texture name, png bytes).
-pub const HEADER_BROWSER: (&str, &[u8]) = ("header-browser", include_bytes!("../assets/headers/browser.png"));
-pub const HEADER_APPEARANCE: (&str, &[u8]) = ("header-appearance", include_bytes!("../assets/headers/appearance.png"));
-/// "Game & Proton" on Linux; just "Game" on Windows, where there is no Proton.
-#[cfg(not(windows))]
-pub const HEADER_GAME: (&str, &[u8]) = ("header-game", include_bytes!("../assets/headers/game.png"));
-#[cfg(windows)]
-pub const HEADER_GAME: (&str, &[u8]) = ("header-game", include_bytes!("../assets/headers/game-windows.png"));
-pub const HEADER_LOGS: (&str, &[u8]) = ("header-logs", include_bytes!("../assets/headers/logs.png"));
-pub const HEADER_SERVER: (&str, &[u8]) = ("header-server", include_bytes!("../assets/headers/server.png"));
-pub const HEADER_UPDATES: (&str, &[u8]) = ("header-updates", include_bytes!("../assets/headers/updates.png"));
-
 /// Gemina 2 by Iconian Fonts (free for non-commercial use, see `assets/fonts/gemina2.txt`),
 /// used for the Play button.
 pub const PLAY_FONT: &[u8] = include_bytes!("../assets/fonts/gemina2.ttf");

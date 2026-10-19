@@ -170,9 +170,7 @@ pub struct App {
 
     // look & feel
     pub logo: egui::TextureHandle,
-    pub name_img: egui::TextureHandle,
-    /// Picture headers of the tabs that have one; the others show a text title.
-    pub headers: Vec<(Page, egui::TextureHandle)>,
+
     /// The loaded background: which one, and its texture (None = plain gradient).
     pub bg: Option<(Background, Option<egui::TextureHandle>)>,
     pub bg_warning: Option<String>,
@@ -249,8 +247,7 @@ impl App {
             log_show: [true; 3],
             log_file: open_log_file(),
             logo: tex(&cc.egui_ctx, "logo", assets::LOGO),
-            name_img: tex(&cc.egui_ctx, "name", assets::NAME),
-            headers: page_headers(&cc.egui_ctx),
+
             bg: None,
             bg_warning: None,
             thumbs: HashMap::new(),
@@ -1169,18 +1166,6 @@ fn pretend_no_game() -> bool {
 fn instance_id() -> String {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     format!("{:x}-{:x}", std::process::id(), nanos)
-}
-
-fn page_headers(ctx: &egui::Context) -> Vec<(Page, egui::TextureHandle)> {
-    let v = [
-        (Page::ServerBrowser, assets::HEADER_BROWSER),
-        (Page::Server, assets::HEADER_SERVER),
-        (Page::Game, assets::HEADER_GAME),
-        (Page::Updates, assets::HEADER_UPDATES),
-        (Page::Appearance, assets::HEADER_APPEARANCE),
-        (Page::Logs, assets::HEADER_LOGS),
-    ];
-    v.into_iter().map(|(page, (name, bytes))| (page, tex(ctx, name, bytes))).collect()
 }
 
 /// Texture from an embedded PNG (always valid: it ships inside the binary).
