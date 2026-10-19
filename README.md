@@ -1,5 +1,7 @@
 # Ring of Elysium — Local Launcher
 
+<img width="1285" height="752" alt="Screenshot From 2026-10-18 22-54-10" src="https://github.com/user-attachments/assets/83264c2f-54b3-457d-81b8-dd05ab80d7e3" />
+
 A native desktop launcher (Rust + egui) for **Linux and Windows** that starts **Ring of Elysium** together with the
 community **local server** ([ROE-LIVE/ring-of-elysium-local](https://github.com/ROE-LIVE/ring-of-elysium-local)),
 keeps that server up to date from GitHub, and gets out of your way: one **PLAY** button does the rest.
