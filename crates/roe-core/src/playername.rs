@@ -17,6 +17,9 @@ use std::process::Command;
 
 /// Longest name: the original "BRING_BACK_ROE!!" is 16 characters, the most the game is known to show.
 pub const MAX_LEN: usize = 16;
+/// Every new player's name: the original server's, as a small Easter egg (it is also the session key's text).
+/// With it the lobby needs no rebuild, and the match shows it too instead of "LOCAL".
+pub const DEFAULT: &str = "BRING_BACK_ROE!!";
 
 /// The trimmed name, or why it can't be used. Empty means "keep the original names".
 /// Only plain ASCII for now: other characters have not been tested in the game.
@@ -146,7 +149,8 @@ mod tests {
     fn names_are_trimmed_and_checked() {
         assert_eq!(validate("  darknetcs "), Ok("darknetcs".into()));
         assert_eq!(validate(""), Ok(String::new()));
-        assert_eq!(validate("BRING_BACK_ROE!!"), Ok("BRING_BACK_ROE!!".into()));
+        assert_eq!(validate(DEFAULT), Ok(DEFAULT.into()));
+        assert_eq!(DEFAULT.len(), MAX_LEN);
         assert_eq!(validate("Big Boss [PL]"), Ok("Big Boss [PL]".into()));
         assert!(validate("seventeen_chars_x").is_err());
         assert!(validate("Łukasz").is_err());
@@ -168,13 +172,18 @@ mod tests {
         let python = if cfg!(windows) { src.join(".tools/python/python.exe") } else { src.join(".tools/venv/bin/python3") };
         let p = Prepared { python, dotnet: "dotnet".into(), dotnet_root: None };
         let lobby_cs = dir.join("search/Ring-of-Elysium-Lobby-Emulator/LobbyEmulator/Logic/LobbyPreData.cs");
+        // the source server may already carry a name: start from upstream's files
+        apply(&p, &dir, "").unwrap();
         let upstream = [std::fs::read(&lobby_cs).unwrap(), std::fs::read(dir.join("config/room.json")).unwrap(), std::fs::read(dir.join("config/wire.json")).unwrap()];
 
+        // the default keeps the lobby packet as upstream recorded it
+        assert_eq!(apply(&p, &dir, DEFAULT).unwrap(), Applied { lobby: false, room: true });
         assert_eq!(apply(&p, &dir, "darknetcs").unwrap(), Applied { lobby: true, room: true });
         assert!(!dir.join("server/lobby/LobbyEmulator.Sdk/bin").exists());
         assert_eq!(apply(&p, &dir, "darknetcs").unwrap(), Applied { lobby: false, room: false });
         assert_eq!(apply(&p, &dir, "Maciej").unwrap(), Applied { lobby: true, room: true });
         assert_eq!(apply(&p, &dir, "").unwrap(), Applied { lobby: true, room: true });
+        assert_eq!(apply(&p, &dir, "").unwrap(), Applied { lobby: false, room: false });
         let now = [std::fs::read(&lobby_cs).unwrap(), std::fs::read(dir.join("config/room.json")).unwrap(), std::fs::read(dir.join("config/wire.json")).unwrap()];
         assert!(now == upstream, "clearing the name restores the upstream files");
     }

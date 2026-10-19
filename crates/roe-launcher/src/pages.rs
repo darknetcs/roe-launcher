@@ -374,8 +374,8 @@ impl App {
             Ok(_) => muted(
                 ui,
                 pal,
-                "Your name in the lobby, on the map selection, in the newspaper and on the stats screen. Leave it empty for \
-                 the original names. Takes effect the next time the server starts.",
+                "Your name in the lobby, on the map selection, in the newspaper and on the stats screen. Everyone starts as \
+                 BRING_BACK_ROE!!, the original server's name. Takes effect the next time the server starts.",
             ),
         }
     }

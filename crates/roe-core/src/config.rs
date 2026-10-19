@@ -144,7 +144,8 @@ pub struct Config {
     pub lan_name: String,
     /// Discord Rich Presence ("Playing Ring of Elysium"); off until the player switches it on.
     pub discord_presence: bool,
-    /// The in-game name (lobby, map selection, newspaper, stats); empty = upstream's names. See `playername`.
+    /// The in-game name (lobby, map selection, newspaper, stats); empty = upstream's names (the match then says
+    /// "LOCAL"). New players start with `playername::DEFAULT`. See `playername`.
     pub player_name: String,
     pub theme: Theme,
 }
@@ -175,7 +176,7 @@ impl Default for Config {
             lan_visible: false,
             lan_name: String::new(),
             discord_presence: false,
-            player_name: String::new(),
+            player_name: crate::playername::DEFAULT.into(),
             theme: Theme::default(),
         }
     }
@@ -374,6 +375,18 @@ mod tests {
         let c = Config::load_from(tmp.path());
         assert!(!c.discord_presence);
         assert_eq!(fs::read_to_string(tmp.path().join("launcher.toml.broken")).unwrap(), broken);
+    }
+
+    #[test]
+    fn players_start_as_the_original_server_but_keep_their_own_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        // a file saved before the setting existed
+        fs::write(tmp.path().join("launcher.toml"), "check_updates_on_start = false\n").unwrap();
+        assert_eq!(Config::load_from(tmp.path()).player_name, "BRING_BACK_ROE!!");
+        fs::write(tmp.path().join("launcher.toml"), "player_name = \"darknetcs\"\n").unwrap();
+        assert_eq!(Config::load_from(tmp.path()).player_name, "darknetcs");
+        fs::write(tmp.path().join("launcher.toml"), "player_name = \"\"\n").unwrap();
+        assert_eq!(Config::load_from(tmp.path()).player_name, "");
     }
 
     #[test]
