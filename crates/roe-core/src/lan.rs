@@ -1,6 +1,8 @@
 //! Finding other launchers on the local network, for the Server Browser.
 //!
-//! A launcher that searches broadcasts `QUERY` to UDP `DISCOVERY_PORT`. A launcher that has
+//! A launcher that searches sends `QUERY` to UDP `DISCOVERY_PORT`: as a broadcast, and also directly to every
+//! address of its own private /24 network (a "sweep"), because many firewalls (e.g. ufw's default deny) drop the
+//! answers to a broadcast but let through an answer from the very address that was asked. A launcher that has
 //! "visible on the network" switched on answers with an `Announcement` (JSON) while its local
 //! server is running. The answer only describes the server: the game connects to `host:port`
 //! as usual, so this protocol never touches the game ports.
@@ -69,17 +71,60 @@ pub fn parse_reply(bytes: &[u8], from: SocketAddr, skip_instance: Option<&str>) 
     })
 }
 
-/// Broadcasts a query on the local network and collects the answers for `wait`.
+/// Searches the local network (broadcast + sweep of this computer's private /24) and collects the answers for `wait`.
 pub fn discover(wait: Duration, skip_instance: Option<&str>) -> Result<Vec<ServerEntry>> {
-    discover_at(SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), DISCOVERY_PORT), wait, skip_instance)
+    let mut targets = vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), DISCOVERY_PORT)];
+    if let Some(ip) = local_ipv4() {
+        targets.extend(sweep_targets(ip));
+    }
+    discover_many(&targets, wait, skip_instance)
 }
 
 /// Same as `discover`, sent to one address (used by tests and for a single known host).
 pub fn discover_at(target: SocketAddr, wait: Duration, skip_instance: Option<&str>) -> Result<Vec<ServerEntry>> {
-    let bind: SocketAddr = if target.ip().is_loopback() { "127.0.0.1:0" } else { "0.0.0.0:0" }.parse().unwrap();
+    discover_many(&[target], wait, skip_instance)
+}
+
+/// This computer's IPv4 address on its main network, or None (e.g. no network). Uses the routing table: "connecting"
+/// a UDP socket sends nothing, it only picks the local address that would be used.
+pub fn local_ipv4() -> Option<Ipv4Addr> {
+    // any public address works; nothing is sent to it
+    let sock = UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect("192.0.2.1:9").ok()?;
+    match sock.local_addr().ok()?.ip() {
+        IpAddr::V4(v) if !v.is_unspecified() && !v.is_loopback() => Some(v),
+        _ => None,
+    }
+}
+
+/// The other addresses of `ip`'s /24, only for private networks (never sweeps public addresses).
+pub fn sweep_targets(ip: Ipv4Addr) -> Vec<SocketAddr> {
+    if !ip.is_private() {
+        return Vec::new();
+    }
+    let [a, b, c, own] = ip.octets();
+    (1..=254u8)
+        .filter(|&d| d != own)
+        .map(|d| SocketAddr::new(IpAddr::V4(Ipv4Addr::new(a, b, c, d)), DISCOVERY_PORT))
+        .collect()
+}
+
+/// Sends the query to every target from one socket and collects the answers for `wait`.
+fn discover_many(targets: &[SocketAddr], wait: Duration, skip_instance: Option<&str>) -> Result<Vec<ServerEntry>> {
+    let loopback = targets.iter().all(|t| t.ip().is_loopback());
+    let bind: SocketAddr = if loopback { "127.0.0.1:0" } else { "0.0.0.0:0" }.parse().unwrap();
     let sock = UdpSocket::bind(bind).context("could not open a UDP socket for the network search")?;
     sock.set_broadcast(true)?;
-    sock.send_to(QUERY, target).context("could not send the network search")?;
+    let mut sent = 0;
+    for t in targets {
+        // a single unreachable address (or a refused broadcast) must not stop the search
+        if sock.send_to(QUERY, t).is_ok() {
+            sent += 1;
+        }
+    }
+    if sent == 0 {
+        anyhow::bail!("could not send the network search");
+    }
     let mut found: Vec<ServerEntry> = Vec::new();
     let mut buf = [0u8; MAX_REPLY + 1];
     let end = Instant::now() + wait;
@@ -169,6 +214,36 @@ mod tests {
         assert!(parse_reply(&serde_json::to_vec(&wrong).unwrap(), from, None).is_none());
         let unnamed = Announcement { name: "\u{7}  ".into(), ..ann("a") };
         assert_eq!(parse_reply(&serde_json::to_vec(&unnamed).unwrap(), from, None).unwrap().name, "Launcher at 192.168.1.20");
+    }
+
+    /// The real search on this computer's network; prints what it finds (`ROE_EXPECT_HOST=10.113.0.4` also checks
+    /// that this host answered). Needs a launcher on the network with "visible" on and its server running.
+    #[test]
+    #[ignore]
+    fn live_discover() {
+        println!("local address: {:?}", local_ipv4());
+        let found = discover(Duration::from_millis(1500), None).unwrap();
+        for e in &found {
+            println!("found {} at {} ({}/{} players, {:?})", e.name, e.address, e.players, e.max_players, e.version);
+        }
+        if let Ok(host) = std::env::var("ROE_EXPECT_HOST") {
+            assert!(found.iter().any(|e| e.address.starts_with(&format!("{host}:"))), "{host} did not answer");
+        }
+    }
+
+    #[test]
+    fn the_sweep_covers_the_private_24_without_self() {
+        let t = sweep_targets(Ipv4Addr::new(10, 113, 0, 2));
+        assert_eq!(t.len(), 253);
+        assert!(t.iter().all(|a| a.port() == DISCOVERY_PORT));
+        assert!(t.contains(&"10.113.0.4:18110".parse().unwrap()));
+        assert!(!t.contains(&"10.113.0.2:18110".parse().unwrap()));
+        assert!(!t.contains(&"10.113.0.0:18110".parse().unwrap()));
+        assert!(!t.contains(&"10.113.0.255:18110".parse().unwrap()));
+        assert_eq!(sweep_targets(Ipv4Addr::new(192, 168, 1, 77)).len(), 253);
+        // never sweep public networks
+        assert!(sweep_targets(Ipv4Addr::new(203, 0, 113, 5)).is_empty());
+        assert!(sweep_targets(Ipv4Addr::new(8, 8, 8, 8)).is_empty());
     }
 
     #[test]
