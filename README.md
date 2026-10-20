@@ -63,7 +63,7 @@ The first start downloads what the server needs (a few hundred MB), then startup
 | **Proton** *(Linux)* | Reads Steam's compatibility tools: GE-Proton, Proton-CachyOS, Proton-EM, UMU-Proton, Valve's Proton, anything with a `proton` script. Choose a fixed version, *"always the newest GE-Proton / CachyOS / …"*, or any custom folder. |
 | **Server updates** | Keeps its own copy of the server files and updates it from GitHub (exact-commit download; keeps your saved profiles, the Python/.NET tools, run logs and reports). Optionally re-applies the bundled **English translation** after every update. |
 | **Launcher updates** | Checks this project's releases at start. *Update now* downloads the package for your system, installs it only if it matches the release's SHA-256 file and replaces the launcher in place; *Restart now* opens the new version (not while the game or server runs). |
-| **Server Browser** *(preview)* | Your local server, servers you save, launchers found on your network and an optional online list, with search, filters and favourites. Only the local server can be joined for now (see [Known limitations](#known-limitations)). |
+| **Server Browser** *(preview)* | Your local server, servers you save, launchers found on your network and an optional online list, with search, filters and favourites. **LAN play:** host a Training session on one computer and **Join** it from another on the same network (see [Playing on your network](#playing-on-your-network-lan)). Servers outside your network can't be joined yet. |
 | **Discord** | *Discord* and *GitHub* buttons in the sidebar. Optional **Rich Presence** (Appearance → Discord, off by default): friends see "Playing Ring of Elysium" and whether you're in the launcher, hosting a server or in a match, with links to the community and the launcher. Works with the regular, Flatpak and Snap Discord apps, and only while Discord runs on your computer. |
 | **Look** | Ring of Elysium styling (logo, and tab titles and PLAY in the *Gemina 2* font). 4 colour themes, your own accent and text colours, 4 bundled backgrounds or your own images, darkening, panel opacity, interface size, and falling snow or a sandstorm. |
 
@@ -149,11 +149,36 @@ the middle of a match, so raise it for long sessions.
 **Linux only:** this tip is for the Linux Steam client and has not been tested on Windows. On Windows, play through
 the launcher.
 
+## Playing on your network (LAN)
+
+One computer hosts, another joins. No accounts, passwords or extra software are needed: the launchers find each
+other and carry the game's traffic between the two computers themselves. Both computers need launcher v0.1.9 or
+newer and the game.
+
+**On the computer that hosts:**
+1. **Server Browser** → tick **Let others on my network join this computer's server**.
+2. **Play Locally** → **Start server only**. The Server Browser then shows *Hosting: others can join…*.
+3. **Firewall:** Windows asks once to allow the launcher; allow it on *private* networks. On Linux with a
+   firewall such as ufw, open the ports once (the launcher shows this line too):
+   `sudo ufw allow 28001,29001/tcp && sudo ufw allow 18110/udp`
+
+**On the computer that plays:** **Server Browser** → **Refresh** → the host appears with **Join** enabled → **Join**.
+The game starts and plays on the host's server; closing the game closes the connection.
+
+**Good to know:**
+* **One player per host.** The community server takes one player, so the host itself can't play while hosting.
+* **The host's settings apply:** its map, match options and Player name.
+* **Finding hosts:** the search asks every address of your network directly as well as broadcasting, so it also
+  works when the player's own firewall would drop broadcast answers.
+* **Private networks only:** a host only accepts computers on private networks (192.168.x.x, 10.x.x.x,
+  172.16–31.x.x).
+* Tested both ways between Windows and Linux.
+
 ## Known limitations
 
 * **Only Training is implemented** by the community server; other game modes don't exist yet.
-* **Joining other computers' servers is not possible yet:** the community server accepts players on its own
-  computer only. The Server Browser is ready for when that changes.
+* **Servers outside your network can't be joined yet.** LAN play works (see above); joining over the internet is
+  planned.
 * **Practice targets vs. Bots:** the server's scripted bot (*Bots*) needs *Target* set to `none`, so it can't be
   combined with practice targets. The launcher shows the server's reason when a combination is refused.
 * **Windows:** stopping the server ends it at once, so the run logs miss their final "stopped" lines (gameplay is
@@ -194,9 +219,13 @@ Presence with another Discord application).
 
 **Server Browser internals:** `roe-core/src/servers.rs` holds the entry model, merging, favourites-first
 filtering, `host:port` validation and a proposed online-list format `{"servers":[...]}` (no such list exists yet;
-set its URL under *Sources*). `roe-core/src/lan.rs` finds launchers on your network with one UDP broadcast to
-port 18110. Being findable is off by default; when switched on, the launcher answers only computers on private
-networks, and only while its server runs.
+set its URL under *Sources*). `roe-core/src/lan.rs` finds launchers on your network: one UDP broadcast to port
+18110 plus a direct query to every other address of the computer's private /24. Being findable is off by default;
+when switched on, the launcher answers only computers on private networks, and only while its server runs.
+`roe-core/src/relay.rs` is the LAN play relay: the host's server runs with upstream's `--lan-tunnel` and the
+launcher forwards TCP 28001 → 8001 and 29001 → 19001 (private addresses only); the player's launcher listens on
+127.0.0.1:8001 and :19001, forwards both to the host and runs upstream's bridge client, so the game connects to
+127.0.0.1:8001 as usual.
 
 ## Artwork, font and licence
 
@@ -213,4 +242,4 @@ names) or adjust `src/assets.rs`.
 * **Profiles**: pick or create named profiles (separate characters and cosmetics).
 * **Doctor page**: one-click diagnostics (Python, .NET, GL, prefix, ports, hash) with a copyable report.
 * **Proton downloader** (Linux): fetch the newest GE-Proton, verify it, install it into `compatibilitytools.d`.
-* Playing across two computers (LAN/SSH remote peer), tray icon, restart-on-crash, AppImage/Flatpak.
+* Joining servers over the internet, tray icon, restart-on-crash, AppImage/Flatpak.
