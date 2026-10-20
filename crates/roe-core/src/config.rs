@@ -140,6 +140,9 @@ pub struct Config {
     pub lan_search: bool,
     /// Answer those searches while the local server runs (off by default: it opens a UDP port).
     pub lan_visible: bool,
+    /// Let other launchers on the network join this computer's server (`relay`); implies being visible. The
+    /// server then runs with `--lan-tunnel` and this computer can't play at the same time. Off by default.
+    pub lan_host: bool,
     /// The name other launchers see; empty = a default.
     pub lan_name: String,
     /// Discord Rich Presence ("Playing Ring of Elysium"); off until the player switches it on.
@@ -176,6 +179,7 @@ impl Default for Config {
             server_directory_url: String::new(),
             lan_search: true,
             lan_visible: false,
+            lan_host: false,
             lan_name: String::new(),
             discord_presence: false,
             player_name: crate::playername::DEFAULT.into(),

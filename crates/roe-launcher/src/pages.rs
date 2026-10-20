@@ -8,7 +8,7 @@ use roe_core::game::Build;
 use roe_core::proton::{self, Kind};
 use roe_core::options::{self, ServerOption};
 use roe_core::servers::{self, ServerEntry, Source};
-use roe_core::{lan, update};
+use roe_core::{lan, relay, update};
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1384,7 +1384,27 @@ impl App {
             ui.add_space(4.0);
             ui.checkbox(&mut self.cfg.lan_search, "Search my local network for other launchers");
             ui.checkbox(&mut self.cfg.lan_visible, format!("Let other launchers on my network find this computer while its server runs (UDP port {})", lan::DISCOVERY_PORT));
-            if self.cfg.lan_visible {
+            ui.checkbox(
+                &mut self.cfg.lan_host,
+                "Let others on my network join this computer's server (host a game: this computer then runs the server only)",
+            );
+            if self.cfg.lan_host {
+                match (&self.browser.host_error, self.is_hosting()) {
+                    (Some(e), _) => ui.colored_label(pal.bad, e),
+                    (None, true) => ui.colored_label(pal.good, format!("Hosting: others can join from their Server Browser (TCP ports {} and {}).", relay::HOST_GAME_PORT, relay::HOST_TUNNEL_PORT)),
+                    (None, false) => ui.colored_label(pal.muted, "Starts with the server: use Start server only. A server already running must be restarted once."),
+                };
+                let firewall = if cfg!(windows) {
+                    "Windows asks once to allow the launcher: allow it on private networks.".to_string()
+                } else {
+                    format!(
+                        "With a firewall such as ufw, open the ports once: sudo ufw allow {},{}/tcp && sudo ufw allow {}/udp",
+                        relay::HOST_GAME_PORT, relay::HOST_TUNNEL_PORT, lan::DISCOVERY_PORT
+                    )
+                };
+                ui.label(RichText::new(firewall).size(12.5).color(pal.muted));
+            }
+            if self.cfg.lan_visible || self.cfg.lan_host {
                 ui.horizontal(|ui| {
                     ui.label("Name shown to others");
                     ui.add(egui::TextEdit::singleline(&mut self.cfg.lan_name).desired_width(260.0).hint_text("Ring of Elysium local server"));

@@ -37,11 +37,13 @@ pub struct Announcement {
     pub max_players: u32,
     pub version: Option<String>,
     pub mode: Option<String>,
+    /// Set when the host lets others join (see `relay`): its [game, tunnel] relay ports. Older launchers omit it.
+    pub relay: Option<[u16; 2]>,
 }
 
 impl Default for Announcement {
     fn default() -> Self {
-        Self { protocol: PROTOCOL, instance: String::new(), name: String::new(), port: 8001, players: 0, max_players: 0, version: None, mode: None }
+        Self { protocol: PROTOCOL, instance: String::new(), name: String::new(), port: 8001, players: 0, max_players: 0, version: None, mode: None, relay: None }
     }
 }
 
@@ -66,6 +68,7 @@ pub fn parse_reply(bytes: &[u8], from: SocketAddr, skip_instance: Option<&str>) 
         max_players: a.max_players,
         version: a.version,
         mode: a.mode,
+        relay: a.relay.filter(|p| p.iter().all(|&x| x != 0)),
         source: Source::Lan,
         ..Default::default()
     })
@@ -148,10 +151,7 @@ fn discover_many(targets: &[SocketAddr], wait: Duration, skip_instance: Option<&
 
 /// Only answer computers on the same network.
 fn local_peer(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v) => v.is_private() || v.is_loopback() || v.is_link_local(),
-        IpAddr::V6(v) => v.is_loopback() || (v.segments()[0] & 0xffc0) == 0xfe80 || (v.segments()[0] & 0xfe00) == 0xfc00,
-    }
+    crate::relay::lan_peer(ip)
 }
 
 /// Answers searches in a background thread until dropped.
@@ -229,6 +229,23 @@ mod tests {
         if let Ok(host) = std::env::var("ROE_EXPECT_HOST") {
             assert!(found.iter().any(|e| e.address.starts_with(&format!("{host}:"))), "{host} did not answer");
         }
+    }
+
+    #[test]
+    fn a_host_that_lets_others_join_can_be_joined() {
+        let from: SocketAddr = "10.113.0.4:18110".parse().unwrap();
+        let mut a = ann("host");
+        // an older launcher (no relay): listed, but not joinable
+        let old = parse_reply(&serde_json::to_vec(&a).unwrap(), from, None).unwrap();
+        assert_eq!(old.relay, None);
+        assert!(crate::servers::can_join(&old).is_err());
+        a.relay = Some([crate::relay::HOST_GAME_PORT, crate::relay::HOST_TUNNEL_PORT]);
+        let host = parse_reply(&serde_json::to_vec(&a).unwrap(), from, None).unwrap();
+        assert_eq!(host.relay, Some([28001, 29001]));
+        assert!(crate::servers::can_join(&host).is_ok());
+        // a zero port is ignored
+        a.relay = Some([0, 29001]);
+        assert_eq!(parse_reply(&serde_json::to_vec(&a).unwrap(), from, None).unwrap().relay, None);
     }
 
     #[test]

@@ -10,10 +10,11 @@ use roe_core::servers::{self, ServerEntry, ServerSource};
 use roe_core::update::{self, InstallInfo, Remote};
 use roe_core::options::{self, ServerOption};
 use roe_core::selfupdate::{self, Release};
-use roe_core::{client, lan, maps, playername, runtime, steam, translate, Sink};
+use roe_core::{client, lan, maps, playername, relay, runtime, steam, translate, Sink};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -65,6 +66,8 @@ pub enum Event {
     Updated(Result<Option<translate::Report>, String>),
     ServerUp(Handle),
     ClientUp(Handle),
+    /// Joined a LAN host: the relay (kept until the game closes) and the host's name.
+    JoinUp(relay::JoinRelay, String),
     FlowDone(Result<(), String>),
     Build(PathBuf, Result<Build, String>),
     Picked(Pick, Option<PathBuf>),
@@ -109,6 +112,11 @@ pub struct Browser {
     lan_name: Arc<Mutex<String>>,
     /// Random per run: lets a search skip this launcher's own answer.
     instance: String,
+    /// While hosting for the network (`cfg.lan_host` and our server runs): the relay to the server's loopback ports.
+    host_relay: Option<relay::HostRelay>,
+    pub host_error: Option<String>,
+    /// Shared with the responder: announce the relay ports only while the relay runs.
+    hosting: Arc<AtomicBool>,
 }
 
 pub struct App {
@@ -181,6 +189,8 @@ pub struct App {
     /// Discord Rich Presence worker (only while switched on) and its last connection status.
     presence: Option<Presence>,
     pub presence_status: Arc<Mutex<String>>,
+    /// Playing on a LAN host (`relay::JoinRelay`) and its name; dropped when the game closes.
+    pub join: Option<(relay::JoinRelay, String)>,
     last_presence: Instant,
     /// "Install with Steam": how Steam was asked (or why it could not be), and since when we wait.
     pub steam_install: Option<Result<String, String>>,
@@ -255,6 +265,7 @@ impl App {
             custom_bgs: backgrounds::list(&backgrounds::dir()),
             presence: None,
             presence_status: Arc::new(Mutex::new(String::new())),
+            join: None,
             last_presence: Instant::now() - Duration::from_secs(10),
             steam_install: None,
             install_wait: None,
@@ -368,8 +379,16 @@ impl App {
                     self.server_ours = true;
                 }
                 Event::ClientUp(h) => self.client = Some(h),
+                Event::JoinUp(r, name) => {
+                    self.log(Src::Launcher, format!("Connected to {name}: starting the game."));
+                    self.join = Some((r, name));
+                }
                 Event::FlowDone(r) => {
                     self.stage = None;
+                    if r.is_err() {
+                        // a join that failed after connecting: close the relay again
+                        self.join = None;
+                    }
                     self.refresh_info();
                     // the first start installs the server's Python, which reads the option list
                     if !matches!(self.schema, Some(Ok(_))) {
@@ -574,6 +593,9 @@ impl App {
         }
         if roe_core::NEEDS_PROTON && self.resolved_proton().is_none() {
             v.push(format!("No Proton runtime found ({page})."));
+        }
+        if self.cfg.lan_host {
+            v.push("This computer hosts for your network (Server Browser): use Start server only. It can't play while it hosts, because the server takes one player.".into());
         }
         v
     }
@@ -811,7 +833,7 @@ impl App {
                         game_dir: game_dir.clone(),
                         duration: cfg.server_duration,
                         extra_args: cfg.server_extra_args.clone(),
-                        lan_tunnel: false,
+                        lan_tunnel: cfg.lan_host,
                         options: options::to_args(&cfg.server_options, known.as_deref()),
                     };
                     let h = server::start(&prepared, &settings, s_sink)?;
@@ -832,18 +854,7 @@ impl App {
                 }
                 if with_client {
                     stage("Starting the game…");
-                    let script = match &proton {
-                        Some(rt) => rt.script.clone(),
-                        None if !roe_core::NEEDS_PROTON => PathBuf::new(),
-                        None => anyhow::bail!("no Proton runtime"),
-                    };
-                    let prefix = if roe_core::NEEDS_PROTON { cfg.resolve_prefix(&game_dir) } else { PathBuf::new() };
-                    let mut cs = client::Settings::new(game_dir.clone(), script, prefix);
-                    cs.server_addr = cfg.connection.address();
-                    cs.extra_args = cfg.client_extra_args.clone();
-                    cs.extra_env = cfg.env_pairs();
-                    cs.proton_log = cfg.proton_log;
-                    let h = client::start(&cs, c_sink)?;
+                    let h = start_game(&cfg, &game_dir, proton.as_ref(), &cfg.connection.address(), c_sink)?;
                     App::emit(&tx, &ctx, Event::ClientUp(h));
                 }
                 Ok(())
@@ -976,9 +987,14 @@ impl App {
         });
     }
 
-    /// Joining = the normal Play flow with the connection set to that server.
+    /// Joining = the normal Play flow with the connection set to that server; a LAN host goes through the relay.
     pub fn join_server(&mut self, e: &ServerEntry) {
         if servers::can_join(e).is_err() {
+            return;
+        }
+        if e.source == servers::Source::Lan {
+            self.page = Page::Play;
+            self.start_join(e.clone());
             return;
         }
         self.cfg.connection = Connection::Local;
@@ -986,6 +1002,69 @@ impl App {
         if self.play_blockers().is_empty() && !self.busy() && !self.client_running() {
             self.start_flow(true);
         }
+    }
+
+    /// Plays on a LAN host: local forwards + upstream's bridge (`relay::JoinRelay`), then the game at 127.0.0.1:8001.
+    /// This computer's own server must be stopped, because joining uses the same local ports.
+    pub fn start_join(&mut self, e: ServerEntry) {
+        if self.busy() || self.client_running() {
+            return;
+        }
+        self.flow_error = None;
+        let (Some(ports), Ok(host)) = (e.relay, e.address.parse::<std::net::SocketAddr>().map(|a| a.ip())) else {
+            self.flow_error = Some(format!("{} can't be joined (no relay announced).", e.name));
+            return;
+        };
+        if self.server_running() || server::ports().proxy || roe_core::util::listening_tcp(relay::TUNNEL_PORT) {
+            self.flow_error = Some("Stop this computer's own server first: joining uses the same local ports (8001, 19001).".into());
+            return;
+        }
+        let (Some(game_dir), proton) = (self.cfg.game_dir.clone(), self.resolved_proton()) else { return };
+        if roe_core::NEEDS_PROTON && proton.is_none() {
+            return;
+        }
+        let cfg = self.cfg.clone();
+        self.stage = Some(format!("Connecting to {}…", e.name));
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        let (s_sink, c_sink, l_sink) = (self.sink(Src::Server), self.sink(Src::Client), self.sink(Src::Launcher));
+        std::thread::spawn(move || {
+            let stage = |s: &str| App::emit(&tx, &ctx, Event::Stage(Some(s.to_string())));
+            let res = (|| -> anyhow::Result<()> {
+                // a clear message beats a game stuck on "connecting"
+                let probe = std::net::SocketAddr::new(host, ports[0]);
+                if std::net::TcpStream::connect_timeout(&probe, Duration::from_secs(3)).is_err() {
+                    anyhow::bail!(
+                        "can't reach {} at {probe}. Is its server running with \"Let others on my network join\" on, and does its firewall allow the launcher?",
+                        e.name
+                    );
+                }
+                let dir = cfg.server_dir_or_default();
+                if !update::is_installed(&dir) {
+                    stage("Downloading the server files from GitHub…");
+                    let remote = update::remote_head()?;
+                    update::install(&dir, &remote.sha, &l_sink)?;
+                }
+                stage("Preparing Python…");
+                let prepared = runtime::ensure(&dir, &l_sink)?;
+                stage(&format!("Connecting to {}…", e.name));
+                let r = relay::JoinRelay::start(host, ports, &prepared.python, &dir, 7200, s_sink)?;
+                // the bridge is ready once it holds the game's UDP port
+                let t = Instant::now();
+                while !roe_core::util::bound_udp(18001) {
+                    if !r.bridge_running() || t.elapsed() > Duration::from_secs(15) {
+                        anyhow::bail!("the match-traffic bridge didn't start (see the Logs page)");
+                    }
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                App::emit(&tx, &ctx, Event::JoinUp(r, e.name.clone()));
+                stage("Starting the game…");
+                let h = start_game(&cfg, &game_dir, proton.as_ref(), Connection::LOCAL_ADDRESS, c_sink)?;
+                App::emit(&tx, &ctx, Event::ClientUp(h));
+                Ok(())
+            })();
+            App::emit(&tx, &ctx, Event::Stage(None));
+            App::emit(&tx, &ctx, Event::FlowDone(res.map_err(|e| format!("{e:#}"))));
+        });
     }
 
     pub fn toggle_favorite(&mut self, address: &str) {
@@ -1002,7 +1081,7 @@ impl App {
     fn sync_lan_responder(&mut self) {
         let b = &mut self.browser;
         *b.lan_name.lock().unwrap() = self.cfg.lan_name.trim().to_string();
-        if !self.cfg.lan_visible {
+        if !self.cfg.lan_visible && !self.cfg.lan_host {
             b.responder = None;
             b.responder_error = None;
             return;
@@ -1010,7 +1089,7 @@ impl App {
         if b.responder.is_some() || b.responder_error.is_some() {
             return;
         }
-        let (name, instance) = (b.lan_name.clone(), b.instance.clone());
+        let (name, instance, hosting) = (b.lan_name.clone(), b.instance.clone(), b.hosting.clone());
         let info = Arc::new(move || {
             if !server::ports().all_up() {
                 return None;
@@ -1024,6 +1103,7 @@ impl App {
                 max_players: 1,
                 version: Some(format!("roe-launcher {}", env!("CARGO_PKG_VERSION"))),
                 mode: Some("Training".into()),
+                relay: hosting.load(Ordering::Relaxed).then_some(relay::HostRelay::PORTS),
                 ..Default::default()
             })
         });
@@ -1034,6 +1114,45 @@ impl App {
                 let msg = format!("{e:#}");
                 b.responder_error = Some(msg.clone());
                 self.log(Src::Launcher, format!("Server Browser: {msg}"));
+            }
+        }
+    }
+
+    /// The host relay is running (others on the network can join).
+    pub fn is_hosting(&self) -> bool {
+        self.browser.host_relay.is_some()
+    }
+
+    /// Hosting for the network: the relay runs while `lan_host` is on and the server we started is up.
+    fn sync_host_relay(&mut self) {
+        let want = self.cfg.lan_host && self.server_ours && self.server_running() && self.ports.all_up();
+        if !want {
+            self.browser.hosting.store(false, Ordering::Relaxed);
+            if !self.cfg.lan_host {
+                self.browser.host_error = None;
+            }
+            if self.browser.host_relay.take().is_some() {
+                self.log(Src::Launcher, "Stopped hosting for the network.".into());
+            }
+            return;
+        }
+        let b = &mut self.browser;
+        if b.host_relay.is_some() || b.host_error.is_some() {
+            return;
+        }
+        match relay::HostRelay::start() {
+            Ok(r) => {
+                b.host_relay = Some(r);
+                b.hosting.store(true, Ordering::Relaxed);
+                self.log(Src::Launcher, format!(
+                    "Hosting for your network: others can join from their Server Browser (TCP ports {} and {}).",
+                    relay::HOST_GAME_PORT, relay::HOST_TUNNEL_PORT
+                ));
+            }
+            Err(e) => {
+                let msg = format!("{e:#}");
+                b.host_error = Some(msg.clone());
+                self.log(Src::Launcher, format!("Could not host for the network: {msg}"));
             }
         }
     }
@@ -1069,6 +1188,12 @@ impl App {
             if self.cfg.stop_server_on_game_exit && self.server_ours && self.server_running() {
                 self.log(Src::Launcher, "Stopping the server (the game was closed).".into());
                 self.stop_server();
+            }
+        }
+        // leave a LAN host when its game stops (not before the game has started)
+        if self.client_was_running && !running {
+            if let Some((_, name)) = self.join.take() {
+                self.log(Src::Launcher, format!("Left {name}: the connection is closed."));
             }
         }
         self.client_was_running = running;
@@ -1114,6 +1239,7 @@ impl App {
 
         self.ensure_background(ctx);
         self.sync_lan_responder();
+        self.sync_host_relay();
         if self.page == Page::ServerBrowser && !self.browser.refreshed {
             self.refresh_servers();
         }
@@ -1270,4 +1396,21 @@ mod wine_fixes {
         PREVIOUS.store(old, Ordering::SeqCst);
         Ok(())
     }
+}
+
+
+/// Starts the game against `addr` (`host:port`) with the user's Proton, prefix and extra settings.
+fn start_game(cfg: &Config, game_dir: &std::path::Path, proton: Option<&Runtime>, addr: &str, sink: Sink) -> anyhow::Result<Handle> {
+    let script = match proton {
+        Some(rt) => rt.script.clone(),
+        None if !roe_core::NEEDS_PROTON => PathBuf::new(),
+        None => anyhow::bail!("no Proton runtime"),
+    };
+    let prefix = if roe_core::NEEDS_PROTON { cfg.resolve_prefix(game_dir) } else { PathBuf::new() };
+    let mut cs = client::Settings::new(game_dir.to_path_buf(), script, prefix);
+    cs.server_addr = addr.to_string();
+    cs.extra_args = cfg.client_extra_args.clone();
+    cs.extra_env = cfg.env_pairs();
+    cs.proton_log = cfg.proton_log;
+    client::start(&cs, sink)
 }

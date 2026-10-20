@@ -58,6 +58,9 @@ pub struct ServerEntry {
     pub tags: Vec<String>,
     pub official: bool,
     pub password: bool,
+    /// A LAN host that lets others join: its [game, tunnel] relay ports (`relay`). Not saved.
+    #[serde(skip)]
+    pub relay: Option<[u16; 2]>,
     #[serde(skip)]
     pub source: Source,
 }
@@ -77,6 +80,7 @@ impl Default for ServerEntry {
             tags: vec![],
             official: false,
             password: false,
+            relay: None,
             source: Source::Saved,
         }
     }
@@ -109,10 +113,11 @@ pub fn local_entry() -> ServerEntry {
 
 /// Why an entry cannot be joined yet, or `Ok` when it can.
 pub fn can_join(e: &ServerEntry) -> Result<(), &'static str> {
-    if e.source == Source::Local {
-        Ok(())
-    } else {
-        Err("Joining other servers is not possible yet: the community server only accepts players on its own computer.")
+    match e.source {
+        Source::Local => Ok(()),
+        Source::Lan if e.relay.is_some() => Ok(()),
+        Source::Lan => Err("This computer's launcher doesn't let others join (it needs \"Let others on my network join\" and launcher v0.1.9 or newer)."),
+        _ => Err("Joining servers outside your network is not possible yet."),
     }
 }
 
