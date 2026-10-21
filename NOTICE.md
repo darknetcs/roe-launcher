@@ -24,3 +24,8 @@ That project has not chosen a licence yet; check its status before redistributin
 
 ## Server
 The server itself is not included: the launcher downloads it from ROE-LIVE/ring-of-elysium-local at run time.
+
+## Third-party libraries
+The launcher is built from open-source Rust libraries (crates). Their licence notices are in
+`THIRD-PARTY-LICENSES.html`, which is generated for each release with `cargo-about` (see `about.toml`) and included in
+both release packages. They include the fonts egui ships with (SIL Open Font License 1.1 and the Ubuntu Font Licence).

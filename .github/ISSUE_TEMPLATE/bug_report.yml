@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in the launcher doesn't work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Problems inside a match (loot, damage, zones…) usually belong to the community server,
+        ROE-LIVE: https://github.com/ROE-LIVE/ring-of-elysium-local. Security problems: please report them privately
+        (see SECURITY.md), not here.
+  - type: input
+    id: version
+    attributes:
+      label: Launcher version
+      description: Shown on the Updates page, e.g. v0.1.10.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: System
+      options:
+        - Linux
+        - Windows 10
+        - Windows 11
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Linux distribution and Proton version (Linux only)
+      placeholder: e.g. Ubuntu 26.04, GE-Proton11-10
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. …\n2. …"
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        The Logs page, or launcher.log (Linux: ~/.local/share/roe-local/launcher.log, Windows:
+        %LOCALAPPDATA%\roe-local\launcher.log). Please remove anything personal first.
+      render: text

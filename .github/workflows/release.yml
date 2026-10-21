@@ -8,9 +8,13 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
-# attaching the packages to the GitHub release needs write access to the repository contents
+# attaching the packages to the GitHub release needs write access to the repository contents;
+# id-token + attestations let GitHub sign build-provenance attestations for the packages
+# (verify with: gh attestation verify <file> -R darknetcs/roe-launcher)
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -22,13 +26,22 @@ jobs:
         run: cargo test -p roe-core
       - name: Build
         run: cargo build --release -p roe-launcher
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+      - name: Third-party licences
+        run: cargo about generate --workspace about.hbs -o THIRD-PARTY-LICENSES.html
       - name: Package
         run: |
           mkdir -p dist/roe-launcher
           cp target/release/roe-launcher dist/roe-launcher/
-          cp packaging/roe-launcher.desktop README.md LICENSE NOTICE.md crates/roe-launcher/assets/fonts/gemina2.txt dist/roe-launcher/
+          cp packaging/roe-launcher.desktop packaging/roe-launcher.png packaging/io.github.darknetcs.roe_launcher.metainfo.xml README.md LICENSE NOTICE.md PRIVACY.md THIRD-PARTY-LICENSES.html crates/roe-launcher/assets/fonts/gemina2.txt dist/roe-launcher/
           tar -C dist -czf roe-launcher-linux-x86_64.tar.gz roe-launcher
           sha256sum roe-launcher-linux-x86_64.tar.gz > roe-launcher-linux-x86_64.tar.gz.sha256
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: roe-launcher-linux-x86_64.tar.gz
       - uses: actions/upload-artifact@v7
         with:
           name: roe-launcher-linux-x86_64
@@ -60,16 +73,25 @@ jobs:
         run: cargo test -p roe-core --target x86_64-pc-windows-msvc
       - name: Build
         run: cargo build --release -p roe-launcher --target x86_64-pc-windows-msvc
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+      - name: Third-party licences
+        run: cargo about generate --workspace about.hbs -o THIRD-PARTY-LICENSES.html
       - name: Package
         run: |
           mkdir -p dist/roe-launcher
-          cp target/x86_64-pc-windows-msvc/release/roe-launcher.exe README.md LICENSE NOTICE.md crates/roe-launcher/assets/fonts/gemina2.txt dist/roe-launcher/
+          cp target/x86_64-pc-windows-msvc/release/roe-launcher.exe README.md LICENSE NOTICE.md PRIVACY.md THIRD-PARTY-LICENSES.html crates/roe-launcher/assets/fonts/gemina2.txt dist/roe-launcher/
           (cd dist && 7z a -tzip ../roe-launcher-windows-x86_64.zip roe-launcher > /dev/null)
           # exactly "<hex>  <name>": Git Bash's sha256sum may print "<hex> *<name>", which launchers up to v0.1.9
           # (their self-update reads this file) would not accept
           hash=$(sha256sum roe-launcher-windows-x86_64.zip | cut -c1-64)
           printf '%s  %s\n' "$hash" roe-launcher-windows-x86_64.zip > roe-launcher-windows-x86_64.zip.sha256
           cat roe-launcher-windows-x86_64.zip.sha256
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: roe-launcher-windows-x86_64.zip
       - uses: actions/upload-artifact@v7
         with:
           name: roe-launcher-windows-x86_64

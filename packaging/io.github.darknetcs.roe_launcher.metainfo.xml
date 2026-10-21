@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata for Linux software centres (and a future Flathub package). -->
+<component type="desktop-application">
+  <id>io.github.darknetcs.roe_launcher</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Ring of Elysium Local Launcher</name>
+  <summary>Play Ring of Elysium on the community local server</summary>
+  <developer id="io.github.darknetcs">
+    <name>darknetcs</name>
+  </developer>
+  <description>
+    <p>
+      A community launcher for Ring of Elysium, whose official servers closed in 2023. It sets up and runs the
+      ROE-LIVE community local server and starts the game against it with one button.
+    </p>
+    <ul>
+      <li>Downloads and updates the community server and everything it needs (Python, .NET)</li>
+      <li>Finds the game in your Steam libraries and checks it is the supported build</li>
+      <li>Runs the game through the Proton version of your choice</li>
+      <li>Every server match option, practice targets, your own player name and an experimental map selector</li>
+      <li>LAN play: host a session on one computer and join it from another</li>
+      <li>Themes, backgrounds, optional Discord Rich Presence, and self-updates</li>
+    </ul>
+    <p>
+      You need your own copy of Ring of Elysium from Steam. This is a community project, not affiliated with Tencent
+      or Aurora Studio. No telemetry: see the privacy policy.
+    </p>
+  </description>
+  <launchable type="desktop-id">roe-launcher.desktop</launchable>
+  <provides>
+    <binary>roe-launcher</binary>
+  </provides>
+  <url type="homepage">https://github.com/darknetcs/roe-launcher</url>
+  <url type="bugtracker">https://github.com/darknetcs/roe-launcher/issues</url>
+  <url type="vcs-browser">https://github.com/darknetcs/roe-launcher</url>
+  <url type="contact">https://discord.gg/p9vHf4T2D</url>
+  <url type="help">https://github.com/darknetcs/roe-launcher#readme</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Play Locally: the game, Proton, server status and the PLAY button</caption>
+      <image>https://raw.githubusercontent.com/darknetcs/roe-launcher/main/docs/screenshot-play.jpg</image>
+    </screenshot>
+  </screenshots>
+  <categories>
+    <category>Game</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.10" date="2026-10-21">
+      <description>
+        <p>Windows exe with version information and an MSVC build, third-party licence notices, build provenance
+        attestations, privacy and security policies, and this metadata.</p>
+      </description>
+    </release>
+    <release version="0.1.9" date="2026-10-20">
+      <description><p>LAN play: host and join from the Server Browser, without SSH.</p></description>
+    </release>
+    <release version="0.1.8" date="2026-10-19">
+      <description><p>Experimental map selector.</p></description>
+    </release>
+    <release version="0.1.7" date="2026-10-19">
+      <description><p>Your own player name.</p></description>
+    </release>
+    <release version="0.1.0" date="2026-10-18">
+      <description><p>First release for Linux and Windows.</p></description>
+    </release>
+  </releases>
+</component>

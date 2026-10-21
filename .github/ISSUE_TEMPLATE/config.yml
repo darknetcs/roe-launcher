@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Community Discord
+    url: https://discord.gg/p9vHf4T2D
+    about: Questions, help with setup, and chatting with other players.
+  - name: Community server (ROE-LIVE)
+    url: https://github.com/ROE-LIVE/ring-of-elysium-local
+    about: Problems inside a match (loot, damage, zones, AI) belong to the server project.

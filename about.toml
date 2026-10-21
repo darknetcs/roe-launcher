@@ -1,0 +1,27 @@
+# cargo-about: the licence notices of every third-party crate in the shipped launcher (THIRD-PARTY-LICENSES.html).
+# Generated in CI for each release and included in both packages; regenerate locally with
+#   cargo about generate --workspace about.hbs -o THIRD-PARTY-LICENSES.html
+# The order is a preference: for "A OR B" crates the first accepted licence below is the one listed.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "Unlicense",
+    "CC0-1.0",
+    "BSL-1.0",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+]
+# what actually ships
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+workarounds = ["ring", "rustls"]

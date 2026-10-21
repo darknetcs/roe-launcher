@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>roe-launcher: third-party licences</title>
+<style>
+body { font-family: sans-serif; max-width: 960px; margin: 2em auto; padding: 0 1em; color: #222; }
+pre { white-space: pre-wrap; background: #f5f5f5; padding: 1em; border-radius: 4px; font-size: 12px; }
+li { margin: .2em 0; }
+</style>
+</head>
+<body>
+<h1>Third-party licences</h1>
+<p>roe-launcher (MIT licence, <a href="https://github.com/darknetcs/roe-launcher">github.com/darknetcs/roe-launcher</a>)
+is built from the open-source Rust crates listed below. Their licence texts follow, as their licences require.
+The game artwork and the Gemina 2 font are not covered here; see NOTICE.md.</p>
+<h2>Overview</h2>
+<ul>
+{{#each overview}}
+<li><a href="#{{id}}">{{name}}</a> ({{count}})</li>
+{{/each}}
+</ul>
+<h2>Licences</h2>
+{{#each licenses}}
+<h3 id="{{id}}">{{name}}</h3>
+<p>Used by:</p>
+<ul>
+{{#each used_by}}
+<li><a href="{{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}}">{{crate.name}} {{crate.version}}</a></li>
+{{/each}}
+</ul>
+<pre>{{text}}</pre>
+{{/each}}
+</body>
+</html>

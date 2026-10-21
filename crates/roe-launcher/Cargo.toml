@@ -2,6 +2,8 @@
 name = "roe-launcher"
 version = "0.1.9"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/darknetcs/roe-launcher"
 description = "GUI launcher for Ring of Elysium and its local server (Linux and Windows)"
 
 [[bin]]

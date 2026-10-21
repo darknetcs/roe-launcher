@@ -21,8 +21,13 @@ Get the latest release from the **[Releases page](https://github.com/darknetcs/r
 | Linux x86_64 (any distro with glibc 2.35+: Ubuntu 22.04+, Debian 12, Fedora, Arch, SteamOS …) | `roe-launcher-linux-x86_64.tar.gz` |
 | Windows 10 / 11, 64-bit | `roe-launcher-windows-x86_64.zip` |
 
-Each file has a `.sha256` next to it. From v0.1.1 on, the launcher **updates itself** (Updates page), so you only
-download it once.
+Each file has a `.sha256` next to it, and from v0.1.10 on a GitHub **build provenance attestation**: proof that it
+was built by this repository's release workflow from the public source
+(`gh attestation verify <file> -R darknetcs/roe-launcher`). From v0.1.1 on, the launcher **updates itself** (Updates
+page), so you only download it once.
+
+**Project documents:** [Privacy policy](PRIVACY.md) · [Security policy](SECURITY.md) · [Changelog](CHANGELOG.md) ·
+third-party licences (`THIRD-PARTY-LICENSES.html` in every package) · [Notices](NOTICE.md) · [MIT licence](LICENSE)
 
 ## Quick start
 
@@ -120,6 +125,27 @@ otherwise download the new release by hand. On Windows the replaced file is kept
 the next start.
 
 HTTPS uses the **system certificate store**, so corporate proxies and custom CAs work.
+
+## Uninstalling
+
+The launcher is portable: it has no installer and changes nothing in your system. To remove it completely:
+
+1. Close it (stop the server first if it runs).
+2. Delete the launcher's own folder (where you unpacked it).
+3. Delete its data:
+
+   | | Linux | Windows |
+   |---|---|---|
+   | Settings | `~/.config/roe-local/` | `%APPDATA%\roe-local\` |
+   | Server files, Python/.NET, logs, backgrounds | `~/.local/share/roe-local/` | `%LOCALAPPDATA%\roe-local\` |
+
+   The second folder also holds your saved lobby profile (character and cosmetics) and the session logs.
+4. Only if you set them up: remove the Steam launch option from
+   [Playing from Steam's Play button](#playing-from-steams-play-button-linux), and on a Linux LAN host the firewall
+   rules (`sudo ufw delete allow 28001,29001/tcp && sudo ufw delete allow 18110/udp`). On Windows, the firewall rule
+   for the launcher can be removed under *Windows Security → Firewall → Allow an app*.
+
+The game itself is not touched: uninstall it through Steam as usual.
 
 ## Playing from Steam's Play button (Linux)
 
@@ -243,7 +269,9 @@ launcher forwards TCP 28001 → 8001 and 29001 → 19001 (private addresses only
 
 ## Artwork, font and licence
 
-The code is MIT-licensed (`LICENSE`); contributions are welcome (`CONTRIBUTING.md`).
+The code is MIT-licensed (`LICENSE`); contributions are welcome (`CONTRIBUTING.md`). The launcher is built from
+open-source Rust libraries; their licence notices are listed in `THIRD-PARTY-LICENSES.html` (generated with
+`cargo-about` from `about.toml` and shipped in every package).
 
 `crates/roe-launcher/assets/` holds the Ring of Elysium logo and four backgrounds (the game publisher's artwork).
 They are not covered by this project's licence; see `NOTICE.md`. The tab titles and the PLAY button are drawn with
