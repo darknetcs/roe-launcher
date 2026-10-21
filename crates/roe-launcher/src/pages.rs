@@ -776,36 +776,13 @@ impl App {
                 ui.colored_label(pal.bad, e);
             }
         });
+        // order: what the server is doing, who can reach it, who you are, where you play, then the knobs
+        ui.add_space(10.0);
+        card(ui, pal, op, |ui| self.network_card(ui, pal));
         ui.add_space(10.0);
         card(ui, pal, op, |ui| self.player_name_card(ui, pal));
         ui.add_space(10.0);
         card(ui, pal, op, |ui| self.map_card(ui, pal));
-        ui.add_space(10.0);
-        card(ui, pal, op, |ui| self.network_card(ui, pal));
-        ui.add_space(10.0);
-        card(ui, pal, op, |ui| {
-            ui.label(RichText::new("Files").strong());
-            let dir = self.cfg.server_dir_or_default();
-            muted(ui, pal, dir.display().to_string());
-            match &self.info {
-                Some(i) => muted(ui, pal, format!("Installed commit {}{}", &i.sha[..i.sha.len().min(10)], if i.translated { "  •  English" } else { "" })),
-                None => muted(ui, pal, "Not installed yet — downloaded automatically on the first start."),
-            }
-            ui.horizontal(|ui| {
-                if ui.button("Choose folder…").clicked() {
-                    self.pick(Pick::ServerDir);
-                }
-                if ui.button("Open folder").clicked() {
-                    open_path(&dir);
-                }
-                if ui.button("Open run logs").clicked() {
-                    open_path(&dir.join("runs"));
-                }
-            });
-            ui.label(RichText::new("This folder belongs to the launcher: an update replaces everything in it except your data (.tools, runs, runtime with your saved profiles, reports). Do not point it at a checkout you edit by hand (git checkouts are refused).").size(12.5).color(pal.muted));
-        });
-        ui.add_space(10.0);
-        card(ui, pal, op, |ui| self.match_options(ui, pal));
         ui.add_space(10.0);
         card(ui, pal, op, |ui| {
             ui.label(RichText::new("Session").strong());
@@ -816,10 +793,12 @@ impl App {
                 ui.add(egui::DragValue::new(&mut self.cfg.keep_runs).range(0..=1000).suffix(" newest"));
                 muted(ui, pal, if self.cfg.keep_runs == 0 { "keeping all".to_string() } else { "older ones are deleted when the launcher starts (0 = keep all)".to_string() });
             });
-            ui.label("Extra arguments for windows_launch.py (anything not listed above)");
+            ui.label("Extra arguments for windows_launch.py (anything the match options below don't cover)");
             ui.add(egui::TextEdit::singleline(&mut self.cfg.server_extra_args).desired_width(f32::INFINITY).hint_text("e.g. --practice-targets 10 --live-control"));
             ui.label(RichText::new("The run-roe-2022.cmd style works too: -PracticeTargets 10 -LiveControl").size(12.5).color(pal.muted));
         });
+        ui.add_space(10.0);
+        card(ui, pal, op, |ui| self.match_options(ui, pal));
         if start {
             self.start_flow(false);
         }
@@ -975,6 +954,28 @@ impl App {
             if !self.libs.is_empty() {
                 ui.label(RichText::new(format!("Steam libraries scanned: {}", self.libs.iter().map(|l| short(&l.display().to_string(), 36)).collect::<Vec<_>>().join(", "))).size(12.5).color(pal.muted));
             }
+        });
+        ui.add_space(10.0);
+        card(ui, pal, op, |ui| {
+            ui.label(RichText::new("Server files").strong());
+            let dir = self.cfg.server_dir_or_default();
+            muted(ui, pal, dir.display().to_string());
+            match &self.info {
+                Some(i) => muted(ui, pal, format!("Installed commit {}{}", &i.sha[..i.sha.len().min(10)], if i.translated { "  •  English" } else { "" })),
+                None => muted(ui, pal, "Not installed yet — downloaded automatically on the first start."),
+            }
+            ui.horizontal(|ui| {
+                if ui.button("Choose folder…").clicked() {
+                    self.pick(Pick::ServerDir);
+                }
+                if ui.button("Open folder").clicked() {
+                    open_path(&dir);
+                }
+                if ui.button("Open run logs").clicked() {
+                    open_path(&dir.join("runs"));
+                }
+            });
+            ui.label(RichText::new("This folder belongs to the launcher: an update replaces everything in it except your data (.tools, runs, runtime with your saved profiles, reports). Do not point it at a checkout you edit by hand (git checkouts are refused).").size(12.5).color(pal.muted));
         });
         if roe_core::NEEDS_PROTON {
             self.proton_and_prefix_cards(ui, pal);
