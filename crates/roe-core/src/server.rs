@@ -112,6 +112,27 @@ pub fn start(p: &Prepared, s: &Settings, sink: Sink) -> Result<Handle> {
     process::spawn_logged(build_command(p, s), sink)
 }
 
+/// The newest session folder (`runs/<date>T<time>-<id>`): the running server's, while one runs.
+pub fn newest_session(dir: &Path) -> Option<PathBuf> {
+    let rd = fs::read_dir(dir.join("runs")).ok()?;
+    rd.flatten()
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter(|e| is_session_folder(&e.file_name().to_string_lossy()))
+        .map(|e| e.path())
+        .max()
+}
+
+/// Players connected to the server right now, counted from its lobby log ("Client connected" minus "Client
+/// disconnected"). A quick connect + disconnect (e.g. a reachability check) adds nothing. None = no session log.
+pub fn players_online(dir: &Path) -> Option<u32> {
+    let log = fs::read_to_string(newest_session(dir)?.join("lobby.log")).ok()?;
+    let count = |what: &str| log.lines().filter(|l| l.trim_end().ends_with(what)).count() as i64;
+    Some((count("Client connected") - count("Client disconnected")).max(0) as u32)
+}
+
+/// How many players the community server takes at a time.
+pub const MAX_PLAYERS: u32 = 1;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Ports {
     pub lobby: bool,
@@ -180,6 +201,27 @@ pub fn ports() -> Ports {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn players_are_counted_from_the_newest_lobby_log() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(players_online(tmp.path()), None);
+        let old = tmp.path().join("runs/20261020T220024-032411");
+        let new = tmp.path().join("runs/20261021T175039-f2f26c");
+        fs::create_dir_all(&old).unwrap();
+        fs::create_dir_all(&new).unwrap();
+        fs::create_dir_all(tmp.path().join("runs/not-a-session")).unwrap();
+        fs::write(old.join("lobby.log"), "[1] [LobbyLoader] EVENT: Client connected\n").unwrap();
+        // the newest session decides; a probe's connect + disconnect adds nothing
+        let log = "Ready...\n[18:50:39] [LobbyLoader] EVENT: Started on port 9001\n\
+                   [18:51:20] [LobbyLoader] EVENT: Client connected\n[18:51:20] [LobbyLoader] EVENT: Client disconnected\n\
+                   [18:51:24] [LobbyLoader] EVENT: Client connected\n[18:51:24] [LobbyLoader] EVENT: Awaiting client..\n";
+        fs::write(new.join("lobby.log"), log).unwrap();
+        assert_eq!(newest_session(tmp.path()), Some(new.clone()));
+        assert_eq!(players_online(tmp.path()), Some(1));
+        fs::write(new.join("lobby.log"), format!("{log}[18:54:14] [LobbyLoader] EVENT: Client disconnected\n")).unwrap();
+        assert_eq!(players_online(tmp.path()), Some(0));
+    }
 
     #[test]
     fn prunes_only_the_oldest_session_folders() {

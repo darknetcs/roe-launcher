@@ -150,7 +150,13 @@ pub fn install(release: &Release, exe: &Path, sink: &Sink) -> Result<()> {
         }
         let fresh = dir.join(if cfg!(windows) { "roe-launcher.new.exe" } else { ".roe-launcher.new" });
         extract_launcher(&archive, &fresh)?;
-        swap_in(&fresh, exe)
+        swap_in(&fresh, exe)?;
+        // the documents (licences, privacy policy, README…) of the same version; a problem here never undoes the update
+        match install_package_files(&archive, dir) {
+            Ok(n) => sink(format!("Updated {n} documents and files next to the launcher.")),
+            Err(e) => sink(format!("The launcher was updated, but its documents could not be: {e:#}")),
+        }
+        Ok(())
     })();
     let _ = fs::remove_file(&archive);
     result?;
@@ -202,6 +208,68 @@ pub fn extract_launcher(archive: &Path, out: &Path) -> Result<()> {
         fs::set_permissions(out, fs::Permissions::from_mode(0o755))?;
     }
     Ok(())
+}
+
+/// A file the package may put next to the launcher: a plain name at the package's top level (no folders, `..` or
+/// hidden names) that isn't the launcher itself (that one is swapped in separately).
+fn package_file_name(path: &str) -> Option<String> {
+    let rest = path.strip_prefix("roe-launcher/")?;
+    let ok = !rest.is_empty()
+        && !rest.starts_with('.')
+        && !rest.contains(['/', '\\'])
+        && rest != "roe-launcher"
+        && rest != "roe-launcher.exe";
+    ok.then(|| rest.to_string())
+}
+
+/// Every other file of a release package: (name, contents). At most 64 files of 10 MB each.
+pub fn package_files(archive: &Path) -> Result<Vec<(String, Vec<u8>)>> {
+    const MAX: u64 = 10 * 1024 * 1024;
+    let mut out = Vec::new();
+    let mut take = |name: Option<String>, size: u64, read: &mut dyn Read| -> Result<()> {
+        if let Some(n) = name {
+            if size > MAX || out.len() >= 64 {
+                bail!("unexpected file {n} in the package");
+            }
+            let mut v = Vec::new();
+            read.take(MAX).read_to_end(&mut v)?;
+            out.push((n, v));
+        }
+        Ok(())
+    };
+    let file_name = archive.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    if file_name.contains(".zip") {
+        let mut z = zip::ZipArchive::new(fs::File::open(archive)?).context("opening the zip")?;
+        for i in 0..z.len() {
+            let mut e = z.by_index(i)?;
+            if e.is_file() {
+                let (name, size) = (package_file_name(e.name()), e.size());
+                take(name, size, &mut e)?;
+            }
+        }
+    } else {
+        let mut t = tar::Archive::new(flate2::read::GzDecoder::new(fs::File::open(archive)?));
+        for e in t.entries()? {
+            let mut e = e?;
+            if e.header().entry_type().is_file() {
+                let (name, size) = (package_file_name(&e.path()?.to_string_lossy()), e.size());
+                take(name, size, &mut e)?;
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Writes the package's other files next to the launcher (each via a temporary name, then renamed over the old
+/// one). Returns how many were written.
+pub fn install_package_files(archive: &Path, dir: &Path) -> Result<usize> {
+    let files = package_files(archive)?;
+    for (name, bytes) in &files {
+        let tmp = dir.join(format!(".{name}.new"));
+        fs::write(&tmp, bytes).with_context(|| format!("writing {name}"))?;
+        fs::rename(&tmp, dir.join(name)).with_context(|| format!("replacing {name}"))?;
+    }
+    Ok(files.len())
 }
 
 /// Where Windows keeps the replaced launcher until the next start.
@@ -311,6 +379,60 @@ mod tests {
     }
 
     #[test]
+    fn an_update_also_brings_the_documents_and_nothing_else() {
+        let tmp = tempfile::tempdir().unwrap();
+        let entries: Vec<(&str, Vec<u8>)> = vec![
+            ("roe-launcher/PRIVACY.md", b"privacy v2".to_vec()),
+            ("roe-launcher/THIRD-PARTY-LICENSES.html", b"licences".to_vec()),
+            ("roe-launcher/roe-launcher", fake_binary()),
+            ("roe-launcher/roe-launcher.exe", fake_binary()),
+            ("roe-launcher/.hidden", b"x".to_vec()),
+            ("roe-launcher/sub/deep.txt", b"x".to_vec()),
+            ("other/README.md", b"x".to_vec()),
+        ];
+        let expect = vec!["PRIVACY.md".to_string(), "THIRD-PARTY-LICENSES.html".to_string()];
+        // tar.gz like the Linux package
+        let tgz = tmp.path().join("pkg.tar.gz");
+        {
+            let gz = flate2::write::GzEncoder::new(fs::File::create(&tgz).unwrap(), flate2::Compression::fast());
+            let mut b = tar::Builder::new(gz);
+            for (name, data) in &entries {
+                let mut h = tar::Header::new_gnu();
+                h.set_size(data.len() as u64);
+                h.set_mode(0o644);
+                h.set_cksum();
+                b.append_data(&mut h, name, data.as_slice()).unwrap();
+            }
+            b.into_inner().unwrap().finish().unwrap();
+        }
+        let names: Vec<String> = package_files(&tgz).unwrap().into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names, expect);
+        // zip like the Windows package
+        let zp = tmp.path().join("pkg.zip");
+        {
+            let mut w = zip::ZipWriter::new(fs::File::create(&zp).unwrap());
+            for (name, data) in &entries {
+                w.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+                w.write_all(data).unwrap();
+            }
+            w.finish().unwrap();
+        }
+        let names: Vec<String> = package_files(&zp).unwrap().into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names, expect);
+        // installing replaces the old copies and leaves other files alone
+        let dir = tmp.path().join("launcher");
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("PRIVACY.md"), "privacy v1").unwrap();
+        fs::write(dir.join("my-notes.txt"), "mine").unwrap();
+        assert_eq!(install_package_files(&zp, &dir).unwrap(), 2);
+        assert_eq!(fs::read_to_string(dir.join("PRIVACY.md")).unwrap(), "privacy v2");
+        assert_eq!(fs::read_to_string(dir.join("THIRD-PARTY-LICENSES.html")).unwrap(), "licences");
+        assert_eq!(fs::read_to_string(dir.join("my-notes.txt")).unwrap(), "mine");
+        assert!(!dir.join(".hidden").exists() && !dir.join("sub").exists() && !dir.join("deep.txt").exists());
+        assert!(!dir.join(".PRIVACY.md.new").exists());
+    }
+
+    #[test]
     fn swaps_the_new_launcher_in() {
         let tmp = tempfile::tempdir().unwrap();
         let exe = tmp.path().join(if cfg!(windows) { "roe-launcher.exe" } else { "roe-launcher" });
@@ -349,6 +471,8 @@ mod tests {
         let sink: Sink = std::sync::Arc::new(|l| eprintln!("{l}"));
         install(&r, &exe, &sink).unwrap();
         assert!(fs::metadata(&exe).unwrap().len() > 1024 * 1024);
+        // packages from v0.1.10 on carry the privacy policy, and updates now install it too
+        assert!(tmp.path().join("PRIVACY.md").is_file());
         eprintln!("installed {} into {}", r.tag, exe.display());
     }
 }

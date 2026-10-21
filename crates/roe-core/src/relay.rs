@@ -8,6 +8,10 @@
 //! - **player**: `JoinRelay` listens on 127.0.0.1:8001 and :19001, forwards both to the host, and runs upstream's
 //!   bridge in client mode (UDP 127.0.0.1:18001 ↔ TCP 19001); the game then starts with `-server=127.0.0.1:8001`.
 //!
+//! Hamachi and Radmin VPN networks count as LAN too (`VPN_NETWORKS`), so a player can join a host over them; their
+//! hosts are found by address ("Join a host by address" in the Server Browser), since the network search only sweeps
+//! the computer's main network.
+//!
 //! Plain `std::net` TCP, the same on Linux and Windows. Verified first by hand over SSH on 2026-10-20 (Windows host,
 //! Linux player, a full Training match).
 use crate::process::{self, Handle};
@@ -90,10 +94,18 @@ fn pipe(a: TcpStream, target: SocketAddr, open: &Mutex<Vec<TcpStream>>) -> io::R
     Ok(())
 }
 
-/// Computers on the same network (private, link-local or loopback IPv4; local IPv6).
+/// Gaming VPNs that act as a LAN: Hamachi (25.0.0.0/8) and Radmin VPN (26.0.0.0/8). Formally public ranges these
+/// programs borrow, so they're accepted only because the user switched hosting on and shares the VPN with the player.
+pub const VPN_NETWORKS: [(Ipv4Addr, u8); 2] = [(Ipv4Addr::new(25, 0, 0, 0), 8), (Ipv4Addr::new(26, 0, 0, 0), 8)];
+
+fn in_vpn(v: Ipv4Addr) -> bool {
+    VPN_NETWORKS.iter().any(|&(net, bits)| u32::from(v) >> (32 - bits) == u32::from(net) >> (32 - bits))
+}
+
+/// Computers on the same network: private, link-local or loopback IPv4, a Hamachi / Radmin VPN address, or local IPv6.
 pub fn lan_peer(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(v) => v.is_private() || v.is_loopback() || v.is_link_local(),
+        IpAddr::V4(v) => v.is_private() || v.is_loopback() || v.is_link_local() || in_vpn(v),
         IpAddr::V6(v) => v.is_loopback() || (v.segments()[0] & 0xffc0) == 0xfe80 || (v.segments()[0] & 0xfe00) == 0xfc00,
     }
 }
@@ -213,6 +225,13 @@ mod tests {
             assert!(lan_peer(ok.parse().unwrap()), "{ok}");
         }
         for bad in ["8.8.8.8", "203.0.113.5", "172.32.0.1"] {
+            assert!(!lan_peer(bad.parse().unwrap()), "{bad}");
+        }
+        // Hamachi and Radmin VPN, but not their neighbours or Tailscale's CGNAT range
+        for ok in ["25.12.34.56", "25.0.0.1", "26.1.2.3", "26.255.255.254"] {
+            assert!(lan_peer(ok.parse().unwrap()), "{ok}");
+        }
+        for bad in ["24.255.255.255", "27.0.0.1", "100.101.102.103"] {
             assert!(!lan_peer(bad.parse().unwrap()), "{bad}");
         }
     }

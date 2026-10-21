@@ -8,7 +8,7 @@ use roe_core::game::Build;
 use roe_core::proton::{self, Kind};
 use roe_core::options::{self, ServerOption};
 use roe_core::servers::{self, ServerEntry, Source};
-use roe_core::{lan, relay, update};
+use roe_core::{lan, relay, server, update};
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -441,6 +441,88 @@ impl App {
         }
     }
 
+    /// Computers asked directly on every refresh: hosts on Hamachi / Radmin VPN (or any network the search can't see).
+    fn hosts_by_address(&mut self, ui: &mut Ui, pal: &Palette) {
+        ui.add_space(6.0);
+        ui.label(RichText::new("Hosts by address").strong());
+        ui.label(
+            RichText::new("For hosts the network search can't find, e.g. over Hamachi (25.x.x.x) or Radmin VPN (26.x.x.x): add their address, then Refresh.")
+                .size(12.5)
+                .color(pal.muted),
+        );
+        let mut remove = None;
+        for (i, h) in self.cfg.lan_hosts.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(h).monospace());
+                if ui.small_button("Remove").clicked() {
+                    remove = Some(i);
+                }
+            });
+        }
+        if let Some(i) = remove {
+            self.cfg.lan_hosts.remove(i);
+        }
+        let mut add = false;
+        ui.horizontal(|ui| {
+            let r = ui.add(egui::TextEdit::singleline(&mut self.browser.host_input).desired_width(200.0).hint_text("e.g. 25.12.34.56"));
+            add = ui.button("Add").clicked() || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+        });
+        if add {
+            match lan::parse_host(&self.browser.host_input) {
+                Some(ip) if self.cfg.lan_hosts.contains(&ip.to_string()) => self.browser.host_input_error = Some(format!("{ip} is already in the list.")),
+                Some(ip) => {
+                    self.cfg.lan_hosts.push(ip.to_string());
+                    self.browser.host_input.clear();
+                    self.browser.host_input_error = None;
+                    self.refresh_servers();
+                }
+                None => self.browser.host_input_error = Some("That isn't an IP address (for example 25.12.34.56).".into()),
+            }
+        }
+        if let Some(e) = &self.browser.host_input_error {
+            ui.colored_label(pal.warn, e);
+        }
+    }
+
+    /// Hosting for the network (Server Settings): being found by other launchers and letting them join.
+    fn network_card(&mut self, ui: &mut Ui, pal: &Palette) {
+        ui.label(RichText::new("Network").strong());
+        ui.checkbox(&mut self.cfg.lan_visible, format!("Let other launchers on my network find this computer while its server runs (UDP port {})", lan::DISCOVERY_PORT));
+        ui.checkbox(
+            &mut self.cfg.lan_host,
+            "Let others on my network join this computer's server (host a game: this computer then runs the server only)",
+        );
+        if self.cfg.lan_host {
+            match (&self.browser.host_error, self.is_hosting()) {
+                (Some(e), _) => ui.colored_label(pal.bad, e),
+                (None, true) => ui.colored_label(pal.good, format!("Hosting: others can join from their Server Browser (TCP ports {} and {}).", relay::HOST_GAME_PORT, relay::HOST_TUNNEL_PORT)),
+                (None, false) => ui.colored_label(pal.muted, "Starts with the server: use Start server only. A server already running must be restarted once."),
+            };
+            let firewall = if cfg!(windows) {
+                "Windows asks once to allow the launcher: allow it on private networks. Hosting over Hamachi or Radmin VPN: \
+                 Windows often treats those as public networks, so allow it on public networks too, or set the VPN \
+                 network to Private."
+                    .to_string()
+            } else {
+                format!(
+                    "With a firewall such as ufw, open the ports once: sudo ufw allow {},{}/tcp && sudo ufw allow {}/udp",
+                    relay::HOST_GAME_PORT, relay::HOST_TUNNEL_PORT, lan::DISCOVERY_PORT
+                )
+            };
+            ui.label(RichText::new(firewall).size(12.5).color(pal.muted));
+        }
+        if self.cfg.lan_visible || self.cfg.lan_host {
+            ui.horizontal(|ui| {
+                ui.label("Name shown to others");
+                ui.add(egui::TextEdit::singleline(&mut self.cfg.lan_name).desired_width(260.0).hint_text("Ring of Elysium local server"));
+            });
+            match &self.browser.responder_error {
+                Some(e) => ui.colored_label(pal.warn, e),
+                None => ui.colored_label(pal.good, "Answering searches on the local network"),
+            };
+        }
+    }
+
     // ---------- Play ----------
     fn page_play(&mut self, ui: &mut Ui, pal: &Palette) {
         header(ui, pal, "Ring of Elysium");
@@ -553,7 +635,11 @@ impl App {
         match action {
             Some(Action::Play) => self.start_flow(true),
             Some(Action::InstallGame) => self.request_game_install(),
-            Some(Action::ServerOnly) => self.start_flow(false),
+            Some(Action::ServerOnly) => {
+                // its status, uptime, players and options live on Server Settings
+                self.start_flow(false);
+                self.page = Page::Server;
+            }
             Some(Action::StopServer) => self.stop_server(),
             Some(Action::StopGame) => self.stop_game(),
             None => {}
@@ -666,7 +752,8 @@ impl App {
                 ui.label(RichText::new(t).size(20.0).strong());
                 if let Some(h) = self.server.as_ref().filter(|h| h.is_running()) {
                     let s = h.started.elapsed().as_secs();
-                    muted(ui, pal, format!("pid {}  •  up {}m {:02}s", h.pid, s / 60, s % 60));
+                    let players = self.players.map_or("?".to_string(), |n| n.to_string());
+                    muted(ui, pal, format!("pid {}  •  up {}m {:02}s  •  players {players}/{}", h.pid, s / 60, s % 60, server::MAX_PLAYERS));
                 }
             });
             ui.add_space(4.0);
@@ -680,6 +767,8 @@ impl App {
                     stop = true;
                 }
             });
+            ui.checkbox(&mut self.cfg.stop_server_on_game_exit, "Stop the server when the game closes")
+                .on_hover_text("When PLAY started the server, closing the game stops it too. Off: the server keeps running for the next match.");
             if !self.game_ok() {
                 ui.colored_label(pal.warn, format!("Select the game folder first ({GAME_PAGE})."));
             }
@@ -687,34 +776,13 @@ impl App {
                 ui.colored_label(pal.bad, e);
             }
         });
+        // order: what the server is doing, who can reach it, who you are, where you play, then the knobs
+        ui.add_space(10.0);
+        card(ui, pal, op, |ui| self.network_card(ui, pal));
         ui.add_space(10.0);
         card(ui, pal, op, |ui| self.player_name_card(ui, pal));
         ui.add_space(10.0);
         card(ui, pal, op, |ui| self.map_card(ui, pal));
-        ui.add_space(10.0);
-        card(ui, pal, op, |ui| {
-            ui.label(RichText::new("Files").strong());
-            let dir = self.cfg.server_dir_or_default();
-            muted(ui, pal, dir.display().to_string());
-            match &self.info {
-                Some(i) => muted(ui, pal, format!("Installed commit {}{}", &i.sha[..i.sha.len().min(10)], if i.translated { "  •  English" } else { "" })),
-                None => muted(ui, pal, "Not installed yet — downloaded automatically on the first start."),
-            }
-            ui.horizontal(|ui| {
-                if ui.button("Choose folder…").clicked() {
-                    self.pick(Pick::ServerDir);
-                }
-                if ui.button("Open folder").clicked() {
-                    open_path(&dir);
-                }
-                if ui.button("Open run logs").clicked() {
-                    open_path(&dir.join("runs"));
-                }
-            });
-            ui.label(RichText::new("This folder belongs to the launcher: an update replaces everything in it except your data (.tools, runs, runtime with your saved profiles, reports). Do not point it at a checkout you edit by hand (git checkouts are refused).").size(12.5).color(pal.muted));
-        });
-        ui.add_space(10.0);
-        card(ui, pal, op, |ui| self.match_options(ui, pal));
         ui.add_space(10.0);
         card(ui, pal, op, |ui| {
             ui.label(RichText::new("Session").strong());
@@ -725,15 +793,12 @@ impl App {
                 ui.add(egui::DragValue::new(&mut self.cfg.keep_runs).range(0..=1000).suffix(" newest"));
                 muted(ui, pal, if self.cfg.keep_runs == 0 { "keeping all".to_string() } else { "older ones are deleted when the launcher starts (0 = keep all)".to_string() });
             });
-            ui.label("Extra arguments for windows_launch.py (anything not listed above)");
+            ui.label("Extra arguments for windows_launch.py (anything the match options below don't cover)");
             ui.add(egui::TextEdit::singleline(&mut self.cfg.server_extra_args).desired_width(f32::INFINITY).hint_text("e.g. --practice-targets 10 --live-control"));
             ui.label(RichText::new("The run-roe-2022.cmd style works too: -PracticeTargets 10 -LiveControl").size(12.5).color(pal.muted));
         });
         ui.add_space(10.0);
-        card(ui, pal, op, |ui| {
-            ui.label(RichText::new("Server output").strong());
-            self.log_box(ui, pal, Some(Src::Server), 240.0);
-        });
+        card(ui, pal, op, |ui| self.match_options(ui, pal));
         if start {
             self.start_flow(false);
         }
@@ -775,8 +840,8 @@ impl App {
             if list.is_empty() {
                 continue;
             }
-            let open = matches!(group, "Match" | "Targets & bots");
-            egui::CollapsingHeader::new(RichText::new(group).strong().color(pal.accent)).default_open(open).show(ui, |ui| {
+            // every group starts closed: the page stays short until the player opens what they need
+            egui::CollapsingHeader::new(RichText::new(group).strong().color(pal.accent)).default_open(false).show(ui, |ui| {
                 for o in list {
                     self.option_row(ui, pal, o);
                 }
@@ -890,6 +955,28 @@ impl App {
                 ui.label(RichText::new(format!("Steam libraries scanned: {}", self.libs.iter().map(|l| short(&l.display().to_string(), 36)).collect::<Vec<_>>().join(", "))).size(12.5).color(pal.muted));
             }
         });
+        ui.add_space(10.0);
+        card(ui, pal, op, |ui| {
+            ui.label(RichText::new("Server files").strong());
+            let dir = self.cfg.server_dir_or_default();
+            muted(ui, pal, dir.display().to_string());
+            match &self.info {
+                Some(i) => muted(ui, pal, format!("Installed commit {}{}", &i.sha[..i.sha.len().min(10)], if i.translated { "  •  English" } else { "" })),
+                None => muted(ui, pal, "Not installed yet — downloaded automatically on the first start."),
+            }
+            ui.horizontal(|ui| {
+                if ui.button("Choose folder…").clicked() {
+                    self.pick(Pick::ServerDir);
+                }
+                if ui.button("Open folder").clicked() {
+                    open_path(&dir);
+                }
+                if ui.button("Open run logs").clicked() {
+                    open_path(&dir.join("runs"));
+                }
+            });
+            ui.label(RichText::new("This folder belongs to the launcher: an update replaces everything in it except your data (.tools, runs, runtime with your saved profiles, reports). Do not point it at a checkout you edit by hand (git checkouts are refused).").size(12.5).color(pal.muted));
+        });
         if roe_core::NEEDS_PROTON {
             self.proton_and_prefix_cards(ui, pal);
         }
@@ -904,7 +991,6 @@ impl App {
                 if roe_core::NEEDS_PROTON {
                     ui.checkbox(&mut self.cfg.proton_log, "Write a Proton log (steam-<appid>.log in the home folder)");
                 }
-                ui.checkbox(&mut self.cfg.stop_server_on_game_exit, "Stop the server when the game closes");
             });
         });
     }
@@ -1374,7 +1460,7 @@ impl App {
                 }
             });
         });
-        ui.label(RichText::new("Only the server on this computer can be joined for now: the community server accepts players on its own computer only. Other entries are listed so they are ready once that changes.").size(12.5).color(pal.muted));
+        ui.label(RichText::new("You can join the server on this computer and hosts on your network (or over Hamachi / Radmin VPN) that let others join. Online servers can't be joined yet.").size(12.5).color(pal.muted));
         ui.add_space(10.0);
 
         card(ui, pal, op, |ui| {
@@ -1383,37 +1469,7 @@ impl App {
             ui.add(egui::TextEdit::singleline(&mut self.cfg.server_directory_url).desired_width(f32::INFINITY).hint_text("https://example.org/servers.json  —  returns {\"servers\": [...]}"));
             ui.add_space(4.0);
             ui.checkbox(&mut self.cfg.lan_search, "Search my local network for other launchers");
-            ui.checkbox(&mut self.cfg.lan_visible, format!("Let other launchers on my network find this computer while its server runs (UDP port {})", lan::DISCOVERY_PORT));
-            ui.checkbox(
-                &mut self.cfg.lan_host,
-                "Let others on my network join this computer's server (host a game: this computer then runs the server only)",
-            );
-            if self.cfg.lan_host {
-                match (&self.browser.host_error, self.is_hosting()) {
-                    (Some(e), _) => ui.colored_label(pal.bad, e),
-                    (None, true) => ui.colored_label(pal.good, format!("Hosting: others can join from their Server Browser (TCP ports {} and {}).", relay::HOST_GAME_PORT, relay::HOST_TUNNEL_PORT)),
-                    (None, false) => ui.colored_label(pal.muted, "Starts with the server: use Start server only. A server already running must be restarted once."),
-                };
-                let firewall = if cfg!(windows) {
-                    "Windows asks once to allow the launcher: allow it on private networks.".to_string()
-                } else {
-                    format!(
-                        "With a firewall such as ufw, open the ports once: sudo ufw allow {},{}/tcp && sudo ufw allow {}/udp",
-                        relay::HOST_GAME_PORT, relay::HOST_TUNNEL_PORT, lan::DISCOVERY_PORT
-                    )
-                };
-                ui.label(RichText::new(firewall).size(12.5).color(pal.muted));
-            }
-            if self.cfg.lan_visible || self.cfg.lan_host {
-                ui.horizontal(|ui| {
-                    ui.label("Name shown to others");
-                    ui.add(egui::TextEdit::singleline(&mut self.cfg.lan_name).desired_width(260.0).hint_text("Ring of Elysium local server"));
-                });
-                match &self.browser.responder_error {
-                    Some(e) => ui.colored_label(pal.warn, e),
-                    None => ui.colored_label(pal.good, "Answering searches on the local network"),
-                };
-            }
+            self.hosts_by_address(ui, pal);
         });
 
         ui.add_space(10.0);
@@ -1539,6 +1595,9 @@ impl App {
             }
             if ui.button("Clear").clicked() {
                 self.logs.clear();
+            }
+            if ui.button("Export…").on_hover_text("Save a copy of the launcher's log file (launcher.log) where you choose, e.g. to attach to a bug report").clicked() {
+                self.export_log();
             }
         });
         card(ui, pal, op, |ui| {

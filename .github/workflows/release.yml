@@ -105,3 +105,31 @@ jobs:
           files: |
             roe-launcher-windows-x86_64.zip
             roe-launcher-windows-x86_64.zip.sha256
+
+  # Report only, tags only: uploads both packages to VirusTotal (key: repository secret VT_API_KEY), waits for the scans and
+  # publishes the result in the job summary and as the `virustotal` artifact (virustotal.md), which goes into the
+  # release notes. Detections don't fail the release; without the secret the job just skips the scan.
+  virustotal:
+    needs: [build, windows]
+    # only for real releases (tags): manual test runs don't spend the VirusTotal API quota
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          path: packages
+          merge-multiple: true
+      - name: Scan with VirusTotal
+        env:
+          VT_API_KEY: ${{ secrets.VT_API_KEY }}
+        run: |
+          .github/scripts/virustotal.sh packages/roe-launcher-linux-x86_64.tar.gz packages/roe-launcher-windows-x86_64.zip > virustotal.md
+          cat virustotal.md >> "$GITHUB_STEP_SUMMARY"
+          cat virustotal.md
+      - uses: actions/upload-artifact@v7
+        with:
+          name: virustotal
+          path: virustotal.md

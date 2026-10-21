@@ -115,6 +115,9 @@ pub struct Browser {
     /// While hosting for the network (`cfg.lan_host` and our server runs): the relay to the server's loopback ports.
     host_relay: Option<relay::HostRelay>,
     pub host_error: Option<String>,
+    /// The "add a host by address" field and why its last input was refused.
+    pub host_input: String,
+    pub host_input_error: Option<String>,
     /// Shared with the responder: announce the relay ports only while the relay runs.
     hosting: Arc<AtomicBool>,
 }
@@ -143,6 +146,8 @@ pub struct App {
     pub client: Option<Handle>,
     pub server_ours: bool,
     pub ports: Ports,
+    /// Players on the running server (from its lobby log), refreshed with the ports; None = no server.
+    pub players: Option<u32>,
     last_poll: Instant,
     client_was_running: bool,
     pub stage: Option<String>,
@@ -235,6 +240,7 @@ impl App {
             client: None,
             server_ours: false,
             ports: Ports::default(),
+            players: None,
             last_poll: Instant::now() - Duration::from_secs(5),
             client_was_running: false,
             stage: None,
@@ -595,7 +601,7 @@ impl App {
             v.push(format!("No Proton runtime found ({page})."));
         }
         if self.cfg.lan_host {
-            v.push("This computer hosts for your network (Server Browser): use Start server only. It can't play while it hosts, because the server takes one player.".into());
+            v.push("This computer hosts for your network (Server Settings, Network card): use Start server only. It can't play while it hosts, because the server takes one player.".into());
         }
         v
     }
@@ -701,6 +707,27 @@ impl App {
             };
             let res = if matches!(kind, Pick::Background | Pick::LootCatalog) { d.pick_file() } else { d.pick_folder() };
             App::emit(&tx, &ctx, Event::Picked(kind, res));
+        });
+    }
+
+    /// Saves a copy of launcher.log where the user chooses (Logs page → Export…).
+    pub fn export_log(&self) {
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        let log = roe_core::util::data_dir().join("launcher.log");
+        std::thread::spawn(move || {
+            let Some(dest) = rfd::FileDialog::new()
+                .set_title("Export the launcher log")
+                .set_file_name("roe-launcher-log.txt")
+                .add_filter("Text", &["txt", "log"])
+                .save_file()
+            else {
+                return;
+            };
+            let msg = match std::fs::copy(&log, &dest) {
+                Ok(_) => format!("Log exported to {}.", dest.display()),
+                Err(e) => format!("Could not export the log to {}: {e}", dest.display()),
+            };
+            App::emit(&tx, &ctx, Event::Log(Src::Launcher, msg));
         });
     }
 
@@ -967,15 +994,21 @@ impl App {
         self.browser.refreshed = true;
         let url = self.cfg.server_directory_url.trim().to_string();
         let lan_search = self.cfg.lan_search;
+        let hosts: Vec<std::net::IpAddr> = self.cfg.lan_hosts.iter().filter_map(|h| lan::parse_host(h)).collect();
         let instance = self.browser.instance.clone();
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         std::thread::spawn(move || {
             let (mut found, mut errors) = (Vec::new(), Vec::new());
-            if lan_search {
-                match lan::discover(Duration::from_millis(1200), Some(&instance)) {
-                    Ok(v) => found.extend(v),
-                    Err(e) => errors.push(format!("network search failed: {e:#}")),
+            match lan::search(lan_search, &hosts, Duration::from_millis(1200), Some(&instance)) {
+                Ok((v, silent)) => {
+                    found.extend(v);
+                    for ip in silent {
+                        errors.push(format!(
+                            "{ip}: no answer. Is its server running with \"Let others on my network join\" on, and does its firewall allow the launcher?"
+                        ));
+                    }
                 }
+                Err(e) => errors.push(format!("network search failed: {e:#}")),
             }
             if !url.is_empty() {
                 match (servers::JsonDirectory { url: url.clone() }).fetch() {
@@ -1090,6 +1123,7 @@ impl App {
             return;
         }
         let (name, instance, hosting) = (b.lan_name.clone(), b.instance.clone(), b.hosting.clone());
+        let server_dir = self.cfg.server_dir_or_default();
         let info = Arc::new(move || {
             if !server::ports().all_up() {
                 return None;
@@ -1099,8 +1133,8 @@ impl App {
                 instance: instance.clone(),
                 name: if name.is_empty() { "Ring of Elysium local server".into() } else { name },
                 port: server::PROXY_PORT,
-                players: 0,
-                max_players: 1,
+                players: server::players_online(&server_dir).unwrap_or(0),
+                max_players: server::MAX_PLAYERS,
                 version: Some(format!("roe-launcher {}", env!("CARGO_PKG_VERSION"))),
                 mode: Some("Training".into()),
                 relay: hosting.load(Ordering::Relaxed).then_some(relay::HostRelay::PORTS),
@@ -1176,6 +1210,7 @@ impl App {
         // port status once a second
         if self.last_poll.elapsed() > Duration::from_secs(1) {
             self.ports = server::ports();
+            self.players = if self.ports.all_up() { server::players_online(&self.cfg.server_dir_or_default()) } else { None };
             self.last_poll = Instant::now();
         }
         ctx.request_repaint_after(Duration::from_millis(if self.cfg.theme.effect == Effect::Off { 500 } else { 33 }));
