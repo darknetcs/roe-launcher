@@ -1,0 +1,38 @@
+// Windows resources for roe-launcher.exe: icon, version information and application manifest.
+// A template: build.rs fills in @MAJOR@/@MINOR@/@PATCH@/@VERSION@ from Cargo.toml and @DIR@ (this folder), writes
+// the result to OUT_DIR and compiles it with embed-resource (rc.exe or windres).
+// Antivirus heuristics treat an exe without any of these as anonymous; see README "Windows: antivirus warnings".
+#include <winver.h>
+
+1 ICON "@DIR@/roe-launcher.ico"
+1 24 "@DIR@/roe-launcher.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION @MAJOR@, @MINOR@, @PATCH@, 0
+PRODUCTVERSION @MAJOR@, @MINOR@, @PATCH@, 0
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "darknetcs (github.com/darknetcs/roe-launcher)"
+            VALUE "FileDescription", "Ring of Elysium Local Launcher (community project)"
+            VALUE "FileVersion", "@VERSION@"
+            VALUE "InternalName", "roe-launcher"
+            VALUE "LegalCopyright", "MIT License, darknetcs and contributors"
+            VALUE "OriginalFilename", "roe-launcher.exe"
+            VALUE "ProductName", "roe-launcher"
+            VALUE "ProductVersion", "@VERSION@"
+            VALUE "Comments", "Open source: https://github.com/darknetcs/roe-launcher. Not affiliated with Tencent or Aurora Studio."
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

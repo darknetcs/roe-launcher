@@ -1,7 +1,8 @@
 # Linux: built on an OLD glibc (Ubuntu 22.04, glibc 2.35) so the binary runs on every mainstream
 # distro released since (Debian 12, Ubuntu 22.04+, Fedora, Arch, SteamOS ...).
-# Windows x64: cross-built with MinGW on the same runner (the build that was tested under Proton),
-# after the core tests passed on a real Windows runner.
+# Windows x64: built on a real Windows runner with the MSVC toolchain and a static C runtime (no Visual C++
+# redistributable needed), after the core tests pass there. MSVC instead of a MinGW cross-build, plus the embedded
+# version information (crates/roe-launcher/windows), makes antivirus heuristics far less likely to flag the exe.
 name: release
 on:
   push:
@@ -42,34 +43,33 @@ jobs:
             roe-launcher-linux-x86_64.tar.gz
             roe-launcher-linux-x86_64.tar.gz.sha256
 
-  windows-test:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Test the core on Windows
-        run: cargo test -p roe-core
-
   windows:
-    needs: windows-test
-    runs-on: ubuntu-22.04
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTFLAGS: -C target-feature=+crt-static
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-gnu
+          targets: x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
-      - name: Install MinGW
-        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Test the core on Windows
+        run: cargo test -p roe-core --target x86_64-pc-windows-msvc
       - name: Build
-        run: cargo build --release -p roe-launcher --target x86_64-pc-windows-gnu
+        run: cargo build --release -p roe-launcher --target x86_64-pc-windows-msvc
       - name: Package
         run: |
           mkdir -p dist/roe-launcher
-          cp target/x86_64-pc-windows-gnu/release/roe-launcher.exe README.md LICENSE NOTICE.md crates/roe-launcher/assets/fonts/gemina2.txt dist/roe-launcher/
-          (cd dist && zip -r ../roe-launcher-windows-x86_64.zip roe-launcher)
-          sha256sum roe-launcher-windows-x86_64.zip > roe-launcher-windows-x86_64.zip.sha256
+          cp target/x86_64-pc-windows-msvc/release/roe-launcher.exe README.md LICENSE NOTICE.md crates/roe-launcher/assets/fonts/gemina2.txt dist/roe-launcher/
+          (cd dist && 7z a -tzip ../roe-launcher-windows-x86_64.zip roe-launcher > /dev/null)
+          # exactly "<hex>  <name>": Git Bash's sha256sum may print "<hex> *<name>", which launchers up to v0.1.9
+          # (their self-update reads this file) would not accept
+          hash=$(sha256sum roe-launcher-windows-x86_64.zip | cut -c1-64)
+          printf '%s  %s\n' "$hash" roe-launcher-windows-x86_64.zip > roe-launcher-windows-x86_64.zip.sha256
+          cat roe-launcher-windows-x86_64.zip.sha256
       - uses: actions/upload-artifact@v7
         with:
           name: roe-launcher-windows-x86_64

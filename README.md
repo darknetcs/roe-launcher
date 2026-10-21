@@ -36,7 +36,8 @@ A `roe-launcher.desktop` file is included if you want a menu entry.
 ### Windows
 1. Unzip `roe-launcher-windows-x86_64.zip` anywhere you can write to (e.g. `Documents\roe-launcher`).
 2. Run `roe-launcher.exe`. The download isn't code-signed, so Windows SmartScreen may warn:
-   choose **More info → Run anyway**.
+   choose **More info → Run anyway**. Some antivirus programs also flag it; see
+   [Windows: antivirus warnings](#windows-antivirus-warnings).
 
 ### Then, on both
 Check that **Play Locally** shows your game (it is found through Steam automatically) and press **PLAY**.
@@ -173,6 +174,19 @@ The game starts and plays on the host's server; closing the game closes the conn
 * **Private networks only:** a host only accepts computers on private networks (192.168.x.x, 10.x.x.x,
   172.16–31.x.x).
 * Tested both ways between Windows and Linux.
+
+## Windows: antivirus warnings
+
+A few antivirus engines (mostly machine-learning ones, e.g. on VirusTotal) may flag `roe-launcher.exe` as suspicious.
+These are false positives: the launcher is a new, unsigned program that does things such tools are wary of on paper:
+it updates itself, starts helper programs (Python, .NET, the game) without console windows and, for LAN play, opens
+network ports.
+
+**Check that your copy is genuine:** compare the SHA-256 of the zip with the `.sha256` file on the
+[Releases page](https://github.com/darknetcs/roe-launcher/releases/latest) (PowerShell:
+`Get-FileHash roe-launcher-windows-x86_64.zip`). The exe is built by GitHub Actions from this repository's public
+source, and it carries version details (publisher, description) under *Properties → Details*. If an engine flags the
+genuine file, please let us know; we report false positives to the vendors.
 
 ## Known limitations
 
