@@ -3,6 +3,12 @@
 All notable changes to roe-launcher. Full release notes and downloads:
 <https://github.com/darknetcs/roe-launcher/releases>.
 
+## Unreleased
+
+* **Server Browser:** new **Ping** column (green / yellow / red), and the columns now follow the window width:
+  long names and addresses are cut to fit (hover shows them in full), and in a narrow window the filter switches
+  move to a second line instead of overlapping the buttons.
+
 ## v0.1.11 — 2026-10-21
 
 * **LAN play over Hamachi and Radmin VPN:** hosts accept players with Hamachi (25.x.x.x) and Radmin VPN (26.x.x.x)

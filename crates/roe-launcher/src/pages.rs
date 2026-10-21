@@ -1375,11 +1375,21 @@ impl App {
         let mut action = None;
 
         card(ui, pal, op, |ui| {
+            // one line when it fits; in a narrow window the filter switches move to a second line
+            const FILTERS_W: f32 = 310.0;
+            const BUTTONS_W: f32 = 220.0;
+            let narrow = ui.available_width() < 220.0 + FILTERS_W + BUTTONS_W;
+            let filters = |ui: &mut Ui, q: &mut servers::Query| {
+                ui.checkbox(&mut q.only_favorites, "Favourites");
+                ui.checkbox(&mut q.hide_full, "Hide full");
+                ui.checkbox(&mut q.hide_password, "Hide locked");
+            };
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.browser.query.search).desired_width(220.0).hint_text("Search name, address or tag"));
-                ui.checkbox(&mut self.browser.query.only_favorites, "Favourites");
-                ui.checkbox(&mut self.browser.query.hide_full, "Hide full");
-                ui.checkbox(&mut self.browser.query.hide_password, "Hide locked");
+                let search_w = if narrow { ui.available_width() - BUTTONS_W } else { (ui.available_width() - FILTERS_W - BUTTONS_W).clamp(220.0, 420.0) };
+                ui.add(egui::TextEdit::singleline(&mut self.browser.query.search).desired_width(search_w.max(120.0)).hint_text("Search name, address or tag"));
+                if !narrow {
+                    filters(ui, &mut self.browser.query);
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Add server…").clicked() {
                         action = Some(BrowserAction::Add);
@@ -1392,6 +1402,9 @@ impl App {
                     }
                 });
             });
+            if narrow {
+                ui.horizontal(|ui| filters(ui, &mut self.browser.query));
+            }
             for e in &self.browser.errors {
                 ui.colored_label(pal.warn, e);
             }
@@ -1405,38 +1418,91 @@ impl App {
                 muted(ui, pal, if all.is_empty() { "No servers yet." } else { "No servers match the filters." });
                 return;
             }
-            egui::Grid::new("servers").num_columns(7).striped(true).spacing([14.0, 8.0]).show(ui, |ui| {
-                for h in ["", "Name", "Address", "Players", "Mode", "Source", ""] {
-                    ui.label(RichText::new(h).size(12.5).color(pal.muted));
+            // columns follow the window: fixed star and buttons, the rest shared out by weight (with minimums)
+            const GAP: f32 = 12.0;
+            const ROW_H: f32 = 40.0;
+            let has_saved = shown.iter().any(|e| e.source == Source::Saved);
+            let star_w = 24.0;
+            let actions_w = if has_saved { 170.0 } else { 64.0 };
+            // name, address, players, ping, mode, source
+            let weights = [0.34, 0.22, 0.09, 0.08, 0.15, 0.12];
+            let mins = [140.0, 120.0, 52.0, 60.0, 80.0, 72.0];
+            let flexible = (ui.available_width() - star_w - actions_w - GAP * 7.0).max(0.0);
+            let mut w: Vec<f32> = weights.iter().zip(mins).map(|(k, m)| (flexible * k).max(m)).collect();
+            // a narrow window can't honour every minimum: the text columns (name, address, mode, source) give up
+            // space alike, their text is cut to fit; players and ping keep theirs, a cut number is useless
+            let total: f32 = w.iter().sum();
+            if total > flexible {
+                let text_cols = [0, 1, 4, 5];
+                let text: f32 = text_cols.iter().map(|&i| w[i]).sum();
+                let scale = ((text - (total - flexible)) / text).max(0.3);
+                text_cols.iter().for_each(|&i| w[i] *= scale);
+            }
+            // one cell of a row: fixed width, text cut to fit (the full text shows on hover)
+            let cell = |ui: &mut Ui, width: f32, add: &mut dyn FnMut(&mut Ui)| {
+                ui.allocate_ui_with_layout(egui::vec2(width, ROW_H), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.set_width(width);
+                    ui.set_min_height(ROW_H);
+                    add(ui);
+                });
+            };
+            let fit = |ui: &mut Ui, text: RichText| {
+                ui.add(egui::Label::new(text).truncate());
+            };
+            ui.spacing_mut().item_spacing.x = GAP;
+
+            ui.horizontal(|ui| {
+                ui.add_space(star_w);
+                for (h, width) in ["Name", "Address", "Players", "Ping", "Mode", "Source"].iter().zip(&w) {
+                    ui.allocate_ui(egui::vec2(*width, 18.0), |ui| {
+                        ui.set_width(*width);
+                        ui.label(RichText::new(*h).size(12.5).color(pal.muted));
+                    });
                 }
-                ui.end_row();
-                for e in &shown {
+            });
+            for (i, e) in shown.iter().enumerate() {
+                let stripe = ui.painter().add(egui::Shape::Noop);
+                let row = ui.horizontal(|ui| {
                     let fav = self.cfg.favorite_servers.iter().any(|f| f == &e.address || f == &e.id);
-                    let star = egui::Button::new(RichText::new("★").size(16.0).color(if fav { pal.accent } else { pal.muted.gamma_multiply(0.5) })).frame(false);
-                    if ui.add(star).on_hover_text(if fav { "Remove from favourites" } else { "Add to favourites" }).clicked() {
-                        action = Some(BrowserAction::Favorite(e.address.clone()));
-                    }
-                    ui.vertical(|ui| {
+                    cell(ui, star_w, &mut |ui| {
+                        let star = egui::Button::new(RichText::new("★").size(16.0).color(if fav { pal.accent } else { pal.muted.gamma_multiply(0.5) })).frame(false);
+                        if ui.add(star).on_hover_text(if fav { "Remove from favourites" } else { "Add to favourites" }).clicked() {
+                            action = Some(BrowserAction::Favorite(e.address.clone()));
+                        }
+                    });
+                    ui.allocate_ui_with_layout(egui::vec2(w[0], ROW_H), egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui.set_width(w[0]);
+                        ui.set_min_height(ROW_H);
+                        ui.spacing_mut().item_spacing.x = 6.0;
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(head(&e.name, 40)).strong());
                             if e.password {
                                 ui.label(RichText::new("locked").size(11.5).color(pal.warn));
                             }
                             if e.official {
                                 ui.label(RichText::new("official").size(11.5).color(pal.good));
                             }
+                            fit(ui, RichText::new(&e.name).strong());
                         });
                         let mut sub: Vec<String> = e.region.iter().cloned().collect();
                         sub.extend(e.tags.iter().cloned());
                         if !sub.is_empty() {
-                            ui.label(RichText::new(head(&sub.join(" · "), 48)).size(11.5).color(pal.muted));
+                            fit(ui, RichText::new(sub.join(" · ")).size(11.5).color(pal.muted));
                         }
                     });
-                    ui.label(RichText::new(&e.address).monospace().color(pal.muted));
-                    ui.label(if e.max_players > 0 { format!("{}/{}", e.players, e.max_players) } else { "—".into() });
-                    ui.label(e.mode.as_deref().unwrap_or("—"));
-                    ui.label(RichText::new(e.source.label()).color(pal.muted));
-                    ui.horizontal(|ui| {
+                    cell(ui, w[1], &mut |ui| fit(ui, RichText::new(&e.address).monospace().color(pal.muted)));
+                    cell(ui, w[2], &mut |ui| fit(ui, RichText::new(if e.max_players > 0 { format!("{}/{}", e.players, e.max_players) } else { "—".into() })));
+                    cell(ui, w[3], &mut |ui| {
+                        // as the directory reports it: green up to 80 ms, yellow up to 150 ms, red above
+                        let text = match e.ping_ms {
+                            Some(ms) => RichText::new(format!("{ms} ms")).color(if ms <= 80 { pal.good } else if ms <= 150 { pal.warn } else { pal.bad }),
+                            None => RichText::new("—").color(pal.muted),
+                        };
+                        fit(ui, text);
+                    });
+                    cell(ui, w[4], &mut |ui| fit(ui, RichText::new(e.mode.as_deref().unwrap_or("—"))));
+                    cell(ui, w[5], &mut |ui| fit(ui, RichText::new(e.source.label()).color(pal.muted)));
+                    cell(ui, actions_w, &mut |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
                         let join = ui.add_enabled(servers::can_join(e).is_ok(), egui::Button::new("Join"));
                         let join = match servers::can_join(e) {
                             Ok(()) => join.on_hover_text("Start the local server (if needed) and the game"),
@@ -1456,9 +1522,12 @@ impl App {
                             }
                         }
                     });
-                    ui.end_row();
+                });
+                if i % 2 == 0 {
+                    let r = row.response.rect.expand2(egui::vec2(4.0, 2.0));
+                    ui.painter().set(stripe, egui::Shape::rect_filled(r, 4.0, ui.visuals().faint_bg_color));
                 }
-            });
+            }
         });
         ui.label(RichText::new("You can join the server on this computer and hosts on your network (or over Hamachi / Radmin VPN) that let others join. Online servers can't be joined yet.").size(12.5).color(pal.muted));
         ui.add_space(10.0);
