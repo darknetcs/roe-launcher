@@ -601,7 +601,7 @@ impl App {
             v.push(format!("No Proton runtime found ({page})."));
         }
         if self.cfg.lan_host {
-            v.push("This computer hosts for your network (Server Settings → Network): use Start server only. It can't play while it hosts, because the server takes one player.".into());
+            v.push("This computer hosts for your network (Server Settings, Network card): use Start server only. It can't play while it hosts, because the server takes one player.".into());
         }
         v
     }
