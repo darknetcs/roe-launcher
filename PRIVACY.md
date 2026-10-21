@@ -53,8 +53,10 @@ These services see your IP address and a standard request like any website does.
   * **Being visible** (when you switch it on) answers such queries from private-network addresses only, while
     your server runs. The answer contains the name you chose, the game port, the player count, the launcher
     version and the game mode.
-  * **Hosting** (when you switch it on) lets computers from private networks join your server (TCP ports 28001
-    and 29001).
+  * **Hosting** (when you switch it on) lets computers from private networks, Hamachi (25.x.x.x) or Radmin VPN
+    (26.x.x.x) join your server (TCP ports 28001 and 29001).
+  * **Hosts by address** (addresses you add in the Server Browser) are asked directly with the same small query
+    on every refresh.
 
 ## Children
 

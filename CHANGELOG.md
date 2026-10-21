@@ -3,6 +3,17 @@
 All notable changes to roe-launcher. Full release notes and downloads:
 <https://github.com/darknetcs/roe-launcher/releases>.
 
+## v0.1.11 — unreleased
+
+* **LAN play over Hamachi and Radmin VPN:** hosts accept players with Hamachi (25.x.x.x) and Radmin VPN (26.x.x.x)
+  addresses, and **Server Browser → Hosts by address** lets players add a host's address so it's found without the
+  network search. Still Training and one player per host.
+* **Updates bring the documents too:** updating the launcher now also replaces the licences, privacy policy,
+  notices and README next to it (and the icon and metadata on Linux).
+* **VirusTotal:** every release is scanned automatically by VirusTotal; the results and report links are on its
+  release page.
+* Kill Zone's tooltip explains that you can't pick a landing point and get Dione's starting packs.
+
 ## v0.1.10 — 2026-10-21
 
 * **Windows:** the exe now carries version information (publisher, description, version), an icon and a manifest,

@@ -26,7 +26,9 @@ genuine. If your copy does **not** match the release's checksum or its build att
 
 Every release package is built by GitHub Actions from this repository's public source and comes with:
 
-* a `.sha256` checksum file next to it, and
+* a `.sha256` checksum file next to it,
+* (from v0.1.11) a VirusTotal scan right after the build, with the results and report links in the release notes,
+  and
 * a GitHub **build provenance attestation**, which proves the file was built by this repository's release workflow
   from a specific commit. Check it with the [GitHub CLI](https://cli.github.com/):
 

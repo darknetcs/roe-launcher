@@ -69,7 +69,7 @@ The first start downloads what the server needs (a few hundred MB), then startup
 | **Proton** *(Linux)* | Reads Steam's compatibility tools: GE-Proton, Proton-CachyOS, Proton-EM, UMU-Proton, Valve's Proton, anything with a `proton` script. Choose a fixed version, *"always the newest GE-Proton / CachyOS / …"*, or any custom folder. |
 | **Server updates** | Keeps its own copy of the server files and updates it from GitHub (exact-commit download; keeps your saved profiles, the Python/.NET tools, run logs and reports). Optionally re-applies the bundled **English translation** after every update. |
 | **Launcher updates** | Checks this project's releases at start. *Update now* downloads the package for your system, installs it only if it matches the release's SHA-256 file and replaces the launcher in place; *Restart now* opens the new version (not while the game or server runs). |
-| **Server Browser** *(preview)* | Your local server, servers you save, launchers found on your network and an optional online list, with search, filters and favourites. **LAN play:** host a Training session on one computer and **Join** it from another on the same network (see [Playing on your network](#playing-on-your-network-lan)). Servers outside your network can't be joined yet. |
+| **Server Browser** *(preview)* | Your local server, servers you save, launchers found on your network and an optional online list, with search, filters and favourites. **LAN play:** host a Training session on one computer and **Join** it from another on the same network, or over **Hamachi** or **Radmin VPN** (see [Playing on your network](#playing-on-your-network-lan)). Other internet servers can't be joined yet. |
 | **Discord** | *Discord* and *GitHub* buttons in the sidebar. Optional **Rich Presence** (Appearance → Discord, off by default): friends see "Playing Ring of Elysium" and whether you're in the launcher, hosting a server or in a match, with links to the community and the launcher. Works with the regular, Flatpak and Snap Discord apps, and only while Discord runs on your computer. |
 | **Look** | Ring of Elysium styling (logo, and tab titles and PLAY in the *Gemina 2* font). 4 colour themes, your own accent and text colours, 4 bundled backgrounds or your own images, darkening, panel opacity, interface size, and falling snow or a sandstorm. |
 
@@ -120,8 +120,9 @@ On Linux the launcher also imports the answers saved by the old `play-roe.sh` sc
 3. If enabled, the built-in translator rewrites Russian comments and messages to English. New upstream text that
    isn't in its dictionary stays Russian and is counted on the Updates page.
 
-**The launcher itself** (Updates page → Launcher): see the table above. It needs a writable launcher folder;
-otherwise download the new release by hand. On Windows the replaced file is kept as `roe-launcher.old.exe` until
+**The launcher itself** (Updates page → Launcher): see the table above. From v0.1.11 on, an update also replaces the
+documents next to the launcher (licences, privacy policy, notices, README), so they always match the version you run.
+It needs a writable launcher folder; otherwise download the new release by hand. On Windows the replaced file is kept as `roe-launcher.old.exe` until
 the next start.
 
 HTTPS uses the **system certificate store**, so corporate proxies and custom CAs work.
@@ -192,13 +193,20 @@ newer and the game.
 **On the computer that plays:** **Server Browser** → **Refresh** → the host appears with **Join** enabled → **Join**.
 The game starts and plays on the host's server; closing the game closes the connection.
 
+**Over Hamachi or Radmin VPN** (v0.1.11 or newer on both computers): both join the same Hamachi or Radmin VPN
+network, the host sets up hosting as above, and the player adds the host's VPN address (Hamachi `25.x.x.x`, Radmin
+VPN `26.x.x.x`) under **Server Browser → Hosts by address** and presses **Refresh**. The network search can't see
+VPN peers by itself, which is why the address is added by hand. On a Windows host, Windows often treats the VPN as a
+*public* network: allow the launcher on public networks too, or set the VPN's network to *Private*.
+
 **Good to know:**
-* **One player per host.** The community server takes one player, so the host itself can't play while hosting.
+* **Training only, one player per host.** The community server offers Training mode (single-player in the original
+  game too) and takes one player, so the host itself can't play while hosting, and two players can't share a match.
 * **The host's settings apply:** its map, match options and Player name.
 * **Finding hosts:** the search asks every address of your network directly as well as broadcasting, so it also
   works when the player's own firewall would drop broadcast answers.
 * **Private networks only:** a host only accepts computers on private networks (192.168.x.x, 10.x.x.x,
-  172.16–31.x.x).
+  172.16–31.x.x) and on Hamachi (25.x.x.x) or Radmin VPN (26.x.x.x).
 * Tested both ways between Windows and Linux.
 
 ## Windows: antivirus warnings
@@ -217,8 +225,8 @@ genuine file, please let us know; we report false positives to the vendors.
 ## Known limitations
 
 * **Only Training is implemented** by the community server; other game modes don't exist yet.
-* **Servers outside your network can't be joined yet.** LAN play works (see above); joining over the internet is
-  planned.
+* **Internet servers can't be joined yet.** LAN play works, also over Hamachi or Radmin VPN (see above); joining
+  other servers over the internet is planned.
 * **Practice targets vs. Bots:** the server's scripted bot (*Bots*) needs *Target* set to `none`, so it can't be
   combined with practice targets. The launcher shows the server's reason when a combination is refused.
 * **Windows:** stopping the server ends it at once, so the run logs miss their final "stopped" lines (gameplay is
