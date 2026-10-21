@@ -48,7 +48,7 @@ These services see your IP address and a standard request like any website does.
 * **Discord Rich Presence** (off by default, *Appearance → Discord*): talks only to the Discord app running on your
   computer, which shows your activity to your Discord friends. Discord's
   [privacy policy](https://discord.com/privacy) applies to what Discord does with it.
-* **LAN play** (off by default, *Server Browser*):
+* **LAN play** (off by default; hosting under *Server Settings → Network*, searching in the *Server Browser*):
   * **Search** sends a small query to the computers of your own private network (UDP port 18110).
   * **Being visible** (when you switch it on) answers such queries from private-network addresses only, while
     your server runs. The answer contains the name you chose, the game port, the player count, the launcher

@@ -8,7 +8,7 @@ use roe_core::game::Build;
 use roe_core::proton::{self, Kind};
 use roe_core::options::{self, ServerOption};
 use roe_core::servers::{self, ServerEntry, Source};
-use roe_core::{lan, relay, update};
+use roe_core::{lan, relay, server, update};
 use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -484,6 +484,45 @@ impl App {
         }
     }
 
+    /// Hosting for the network (Server Settings): being found by other launchers and letting them join.
+    fn network_card(&mut self, ui: &mut Ui, pal: &Palette) {
+        ui.label(RichText::new("Network").strong());
+        ui.checkbox(&mut self.cfg.lan_visible, format!("Let other launchers on my network find this computer while its server runs (UDP port {})", lan::DISCOVERY_PORT));
+        ui.checkbox(
+            &mut self.cfg.lan_host,
+            "Let others on my network join this computer's server (host a game: this computer then runs the server only)",
+        );
+        if self.cfg.lan_host {
+            match (&self.browser.host_error, self.is_hosting()) {
+                (Some(e), _) => ui.colored_label(pal.bad, e),
+                (None, true) => ui.colored_label(pal.good, format!("Hosting: others can join from their Server Browser (TCP ports {} and {}).", relay::HOST_GAME_PORT, relay::HOST_TUNNEL_PORT)),
+                (None, false) => ui.colored_label(pal.muted, "Starts with the server: use Start server only. A server already running must be restarted once."),
+            };
+            let firewall = if cfg!(windows) {
+                "Windows asks once to allow the launcher: allow it on private networks. Hosting over Hamachi or Radmin VPN: \
+                 Windows often treats those as public networks, so allow it on public networks too, or set the VPN \
+                 network to Private."
+                    .to_string()
+            } else {
+                format!(
+                    "With a firewall such as ufw, open the ports once: sudo ufw allow {},{}/tcp && sudo ufw allow {}/udp",
+                    relay::HOST_GAME_PORT, relay::HOST_TUNNEL_PORT, lan::DISCOVERY_PORT
+                )
+            };
+            ui.label(RichText::new(firewall).size(12.5).color(pal.muted));
+        }
+        if self.cfg.lan_visible || self.cfg.lan_host {
+            ui.horizontal(|ui| {
+                ui.label("Name shown to others");
+                ui.add(egui::TextEdit::singleline(&mut self.cfg.lan_name).desired_width(260.0).hint_text("Ring of Elysium local server"));
+            });
+            match &self.browser.responder_error {
+                Some(e) => ui.colored_label(pal.warn, e),
+                None => ui.colored_label(pal.good, "Answering searches on the local network"),
+            };
+        }
+    }
+
     // ---------- Play ----------
     fn page_play(&mut self, ui: &mut Ui, pal: &Palette) {
         header(ui, pal, "Ring of Elysium");
@@ -596,7 +635,11 @@ impl App {
         match action {
             Some(Action::Play) => self.start_flow(true),
             Some(Action::InstallGame) => self.request_game_install(),
-            Some(Action::ServerOnly) => self.start_flow(false),
+            Some(Action::ServerOnly) => {
+                // its status, uptime, players and options live on Server Settings
+                self.start_flow(false);
+                self.page = Page::Server;
+            }
             Some(Action::StopServer) => self.stop_server(),
             Some(Action::StopGame) => self.stop_game(),
             None => {}
@@ -709,7 +752,8 @@ impl App {
                 ui.label(RichText::new(t).size(20.0).strong());
                 if let Some(h) = self.server.as_ref().filter(|h| h.is_running()) {
                     let s = h.started.elapsed().as_secs();
-                    muted(ui, pal, format!("pid {}  •  up {}m {:02}s", h.pid, s / 60, s % 60));
+                    let players = self.players.map_or("?".to_string(), |n| n.to_string());
+                    muted(ui, pal, format!("pid {}  •  up {}m {:02}s  •  players {players}/{}", h.pid, s / 60, s % 60, server::MAX_PLAYERS));
                 }
             });
             ui.add_space(4.0);
@@ -734,6 +778,8 @@ impl App {
         card(ui, pal, op, |ui| self.player_name_card(ui, pal));
         ui.add_space(10.0);
         card(ui, pal, op, |ui| self.map_card(ui, pal));
+        ui.add_space(10.0);
+        card(ui, pal, op, |ui| self.network_card(ui, pal));
         ui.add_space(10.0);
         card(ui, pal, op, |ui| {
             ui.label(RichText::new("Files").strong());
@@ -1426,41 +1472,7 @@ impl App {
             ui.add(egui::TextEdit::singleline(&mut self.cfg.server_directory_url).desired_width(f32::INFINITY).hint_text("https://example.org/servers.json  —  returns {\"servers\": [...]}"));
             ui.add_space(4.0);
             ui.checkbox(&mut self.cfg.lan_search, "Search my local network for other launchers");
-            ui.checkbox(&mut self.cfg.lan_visible, format!("Let other launchers on my network find this computer while its server runs (UDP port {})", lan::DISCOVERY_PORT));
-            ui.checkbox(
-                &mut self.cfg.lan_host,
-                "Let others on my network join this computer's server (host a game: this computer then runs the server only)",
-            );
-            if self.cfg.lan_host {
-                match (&self.browser.host_error, self.is_hosting()) {
-                    (Some(e), _) => ui.colored_label(pal.bad, e),
-                    (None, true) => ui.colored_label(pal.good, format!("Hosting: others can join from their Server Browser (TCP ports {} and {}).", relay::HOST_GAME_PORT, relay::HOST_TUNNEL_PORT)),
-                    (None, false) => ui.colored_label(pal.muted, "Starts with the server: use Start server only. A server already running must be restarted once."),
-                };
-                let firewall = if cfg!(windows) {
-                    "Windows asks once to allow the launcher: allow it on private networks. Hosting over Hamachi or Radmin VPN: \
-                     Windows often treats those as public networks, so allow it on public networks too, or set the VPN \
-                     network to Private."
-                        .to_string()
-                } else {
-                    format!(
-                        "With a firewall such as ufw, open the ports once: sudo ufw allow {},{}/tcp && sudo ufw allow {}/udp",
-                        relay::HOST_GAME_PORT, relay::HOST_TUNNEL_PORT, lan::DISCOVERY_PORT
-                    )
-                };
-                ui.label(RichText::new(firewall).size(12.5).color(pal.muted));
-            }
             self.hosts_by_address(ui, pal);
-            if self.cfg.lan_visible || self.cfg.lan_host {
-                ui.horizontal(|ui| {
-                    ui.label("Name shown to others");
-                    ui.add(egui::TextEdit::singleline(&mut self.cfg.lan_name).desired_width(260.0).hint_text("Ring of Elysium local server"));
-                });
-                match &self.browser.responder_error {
-                    Some(e) => ui.colored_label(pal.warn, e),
-                    None => ui.colored_label(pal.good, "Answering searches on the local network"),
-                };
-            }
         });
 
         ui.add_space(10.0);
@@ -1586,6 +1598,9 @@ impl App {
             }
             if ui.button("Clear").clicked() {
                 self.logs.clear();
+            }
+            if ui.button("Export…").on_hover_text("Save a copy of the launcher's log file (launcher.log) where you choose, e.g. to attach to a bug report").clicked() {
+                self.export_log();
             }
         });
         card(ui, pal, op, |ui| {

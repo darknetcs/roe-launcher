@@ -184,7 +184,7 @@ other and carry the game's traffic between the two computers themselves. Both co
 newer and the game.
 
 **On the computer that hosts:**
-1. **Server Browser** → tick **Let others on my network join this computer's server**.
+1. **Server Settings → Network** → tick **Let others on my network join this computer's server**.
 2. **Play Locally** → **Start server only**. The Server Browser then shows *Hosting: others can join…*.
 3. **Firewall:** Windows asks once to allow the launcher; allow it on *private* networks. On Linux with a
    firewall such as ufw, open the ports once (the launcher shows this line too):
