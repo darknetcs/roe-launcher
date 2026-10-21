@@ -3,7 +3,7 @@
 All notable changes to roe-launcher. Full release notes and downloads:
 <https://github.com/darknetcs/roe-launcher/releases>.
 
-## v0.1.10 — unreleased
+## v0.1.10 — 2026-10-21
 
 * **Windows:** the exe now carries version information (publisher, description, version), an icon and a manifest,
   and is built with Microsoft's toolchain (MSVC) instead of MinGW. Together they make antivirus false positives far
