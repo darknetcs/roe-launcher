@@ -106,11 +106,13 @@ jobs:
             roe-launcher-windows-x86_64.zip
             roe-launcher-windows-x86_64.zip.sha256
 
-  # Report only: uploads both packages to VirusTotal (key: repository secret VT_API_KEY), waits for the scans and
+  # Report only, tags only: uploads both packages to VirusTotal (key: repository secret VT_API_KEY), waits for the scans and
   # publishes the result in the job summary and as the `virustotal` artifact (virustotal.md), which goes into the
   # release notes. Detections don't fail the release; without the secret the job just skips the scan.
   virustotal:
     needs: [build, windows]
+    # only for real releases (tags): manual test runs don't spend the VirusTotal API quota
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
     permissions:
       contents: read
