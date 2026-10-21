@@ -767,6 +767,8 @@ impl App {
                     stop = true;
                 }
             });
+            ui.checkbox(&mut self.cfg.stop_server_on_game_exit, "Stop the server when the game closes")
+                .on_hover_text("When PLAY started the server, closing the game stops it too. Off: the server keeps running for the next match.");
             if !self.game_ok() {
                 ui.colored_label(pal.warn, format!("Select the game folder first ({GAME_PAGE})."));
             }
@@ -818,11 +820,6 @@ impl App {
             ui.add(egui::TextEdit::singleline(&mut self.cfg.server_extra_args).desired_width(f32::INFINITY).hint_text("e.g. --practice-targets 10 --live-control"));
             ui.label(RichText::new("The run-roe-2022.cmd style works too: -PracticeTargets 10 -LiveControl").size(12.5).color(pal.muted));
         });
-        ui.add_space(10.0);
-        card(ui, pal, op, |ui| {
-            ui.label(RichText::new("Server output").strong());
-            self.log_box(ui, pal, Some(Src::Server), 240.0);
-        });
         if start {
             self.start_flow(false);
         }
@@ -864,8 +861,8 @@ impl App {
             if list.is_empty() {
                 continue;
             }
-            let open = matches!(group, "Match" | "Targets & bots");
-            egui::CollapsingHeader::new(RichText::new(group).strong().color(pal.accent)).default_open(open).show(ui, |ui| {
+            // every group starts closed: the page stays short until the player opens what they need
+            egui::CollapsingHeader::new(RichText::new(group).strong().color(pal.accent)).default_open(false).show(ui, |ui| {
                 for o in list {
                     self.option_row(ui, pal, o);
                 }
@@ -993,7 +990,6 @@ impl App {
                 if roe_core::NEEDS_PROTON {
                     ui.checkbox(&mut self.cfg.proton_log, "Write a Proton log (steam-<appid>.log in the home folder)");
                 }
-                ui.checkbox(&mut self.cfg.stop_server_on_game_exit, "Stop the server when the game closes");
             });
         });
     }
