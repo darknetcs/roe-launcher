@@ -441,6 +441,49 @@ impl App {
         }
     }
 
+    /// Computers asked directly on every refresh: hosts on Hamachi / Radmin VPN (or any network the search can't see).
+    fn hosts_by_address(&mut self, ui: &mut Ui, pal: &Palette) {
+        ui.add_space(6.0);
+        ui.label(RichText::new("Hosts by address").strong());
+        ui.label(
+            RichText::new("For hosts the network search can't find, e.g. over Hamachi (25.x.x.x) or Radmin VPN (26.x.x.x): add their address, then Refresh.")
+                .size(12.5)
+                .color(pal.muted),
+        );
+        let mut remove = None;
+        for (i, h) in self.cfg.lan_hosts.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(h).monospace());
+                if ui.small_button("Remove").clicked() {
+                    remove = Some(i);
+                }
+            });
+        }
+        if let Some(i) = remove {
+            self.cfg.lan_hosts.remove(i);
+        }
+        let mut add = false;
+        ui.horizontal(|ui| {
+            let r = ui.add(egui::TextEdit::singleline(&mut self.browser.host_input).desired_width(200.0).hint_text("e.g. 25.12.34.56"));
+            add = ui.button("Add").clicked() || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+        });
+        if add {
+            match lan::parse_host(&self.browser.host_input) {
+                Some(ip) if self.cfg.lan_hosts.contains(&ip.to_string()) => self.browser.host_input_error = Some(format!("{ip} is already in the list.")),
+                Some(ip) => {
+                    self.cfg.lan_hosts.push(ip.to_string());
+                    self.browser.host_input.clear();
+                    self.browser.host_input_error = None;
+                    self.refresh_servers();
+                }
+                None => self.browser.host_input_error = Some("That isn't an IP address (for example 25.12.34.56).".into()),
+            }
+        }
+        if let Some(e) = &self.browser.host_input_error {
+            ui.colored_label(pal.warn, e);
+        }
+    }
+
     // ---------- Play ----------
     fn page_play(&mut self, ui: &mut Ui, pal: &Palette) {
         header(ui, pal, "Ring of Elysium");
@@ -1374,7 +1417,7 @@ impl App {
                 }
             });
         });
-        ui.label(RichText::new("Only the server on this computer can be joined for now: the community server accepts players on its own computer only. Other entries are listed so they are ready once that changes.").size(12.5).color(pal.muted));
+        ui.label(RichText::new("You can join the server on this computer and hosts on your network (or over Hamachi / Radmin VPN) that let others join. Online servers can't be joined yet.").size(12.5).color(pal.muted));
         ui.add_space(10.0);
 
         card(ui, pal, op, |ui| {
@@ -1395,7 +1438,10 @@ impl App {
                     (None, false) => ui.colored_label(pal.muted, "Starts with the server: use Start server only. A server already running must be restarted once."),
                 };
                 let firewall = if cfg!(windows) {
-                    "Windows asks once to allow the launcher: allow it on private networks.".to_string()
+                    "Windows asks once to allow the launcher: allow it on private networks. Hosting over Hamachi or Radmin VPN: \
+                     Windows often treats those as public networks, so allow it on public networks too, or set the VPN \
+                     network to Private."
+                        .to_string()
                 } else {
                     format!(
                         "With a firewall such as ufw, open the ports once: sudo ufw allow {},{}/tcp && sudo ufw allow {}/udp",
@@ -1404,6 +1450,7 @@ impl App {
                 };
                 ui.label(RichText::new(firewall).size(12.5).color(pal.muted));
             }
+            self.hosts_by_address(ui, pal);
             if self.cfg.lan_visible || self.cfg.lan_host {
                 ui.horizontal(|ui| {
                     ui.label("Name shown to others");

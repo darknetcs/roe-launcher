@@ -76,11 +76,37 @@ pub fn parse_reply(bytes: &[u8], from: SocketAddr, skip_instance: Option<&str>) 
 
 /// Searches the local network (broadcast + sweep of this computer's private /24) and collects the answers for `wait`.
 pub fn discover(wait: Duration, skip_instance: Option<&str>) -> Result<Vec<ServerEntry>> {
-    let mut targets = vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), DISCOVERY_PORT)];
-    if let Some(ip) = local_ipv4() {
-        targets.extend(sweep_targets(ip));
+    search(true, &[], wait, skip_instance).map(|(found, _)| found)
+}
+
+/// One search for the Server Browser: the local network (if `network`) plus the computers the user added by address
+/// (`hosts`, e.g. Hamachi or Radmin VPN peers the network search can't see). Returns what answered and the hosts
+/// that didn't.
+pub fn search(network: bool, hosts: &[IpAddr], wait: Duration, skip_instance: Option<&str>) -> Result<(Vec<ServerEntry>, Vec<IpAddr>)> {
+    let mut targets = Vec::new();
+    if network {
+        targets.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), DISCOVERY_PORT));
+        if let Some(ip) = local_ipv4() {
+            targets.extend(sweep_targets(ip));
+        }
     }
-    discover_many(&targets, wait, skip_instance)
+    targets.extend(hosts.iter().map(|&ip| SocketAddr::new(ip, DISCOVERY_PORT)));
+    if targets.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let found = discover_many(&targets, wait, skip_instance)?;
+    let silent = hosts
+        .iter()
+        .filter(|ip| !found.iter().any(|e| e.address.parse::<SocketAddr>().is_ok_and(|a| a.ip() == **ip)))
+        .copied()
+        .collect();
+    Ok((found, silent))
+}
+
+/// A host address typed by the user: an IPv4/IPv6 address, with or without a port (the port is ignored).
+pub fn parse_host(text: &str) -> Option<IpAddr> {
+    let t = text.trim();
+    t.parse::<IpAddr>().ok().or_else(|| t.parse::<SocketAddr>().ok().map(|a| a.ip()))
 }
 
 /// Same as `discover`, sent to one address (used by tests and for a single known host).
@@ -246,6 +272,22 @@ mod tests {
         // a zero port is ignored
         a.relay = Some([0, 29001]);
         assert_eq!(parse_reply(&serde_json::to_vec(&a).unwrap(), from, None).unwrap().relay, None);
+    }
+
+    #[test]
+    fn hosts_added_by_address_are_asked_directly() {
+        // a visible launcher on loopback stands in for a Hamachi peer
+        let r = Responder::start("127.0.0.1:0".parse().unwrap(), Arc::new(|| Some(ann("vpn-host")))).unwrap();
+        let port = r.local.port();
+        let found = discover_many(&[SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)], Duration::from_millis(800), None).unwrap();
+        assert_eq!(found.len(), 1);
+        // search() reports a silent host (nothing listens on the discovery port of 127.0.0.2)
+        let (_, silent) = search(false, &["127.0.0.2".parse().unwrap()], Duration::from_millis(300), None).unwrap();
+        assert_eq!(silent, vec!["127.0.0.2".parse::<IpAddr>().unwrap()]);
+        assert_eq!(parse_host(" 25.1.2.3 "), Some("25.1.2.3".parse().unwrap()));
+        assert_eq!(parse_host("26.4.5.6:8001"), Some("26.4.5.6".parse().unwrap()));
+        assert_eq!(parse_host("not an ip"), None);
+        assert_eq!(search(false, &[], Duration::from_millis(10), None).unwrap(), (Vec::new(), Vec::new()));
     }
 
     #[test]

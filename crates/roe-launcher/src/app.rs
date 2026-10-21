@@ -115,6 +115,9 @@ pub struct Browser {
     /// While hosting for the network (`cfg.lan_host` and our server runs): the relay to the server's loopback ports.
     host_relay: Option<relay::HostRelay>,
     pub host_error: Option<String>,
+    /// The "add a host by address" field and why its last input was refused.
+    pub host_input: String,
+    pub host_input_error: Option<String>,
     /// Shared with the responder: announce the relay ports only while the relay runs.
     hosting: Arc<AtomicBool>,
 }
@@ -967,15 +970,21 @@ impl App {
         self.browser.refreshed = true;
         let url = self.cfg.server_directory_url.trim().to_string();
         let lan_search = self.cfg.lan_search;
+        let hosts: Vec<std::net::IpAddr> = self.cfg.lan_hosts.iter().filter_map(|h| lan::parse_host(h)).collect();
         let instance = self.browser.instance.clone();
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         std::thread::spawn(move || {
             let (mut found, mut errors) = (Vec::new(), Vec::new());
-            if lan_search {
-                match lan::discover(Duration::from_millis(1200), Some(&instance)) {
-                    Ok(v) => found.extend(v),
-                    Err(e) => errors.push(format!("network search failed: {e:#}")),
+            match lan::search(lan_search, &hosts, Duration::from_millis(1200), Some(&instance)) {
+                Ok((v, silent)) => {
+                    found.extend(v);
+                    for ip in silent {
+                        errors.push(format!(
+                            "{ip}: no answer. Is its server running with \"Let others on my network join\" on, and does its firewall allow the launcher?"
+                        ));
+                    }
                 }
+                Err(e) => errors.push(format!("network search failed: {e:#}")),
             }
             if !url.is_empty() {
                 match (servers::JsonDirectory { url: url.clone() }).fetch() {

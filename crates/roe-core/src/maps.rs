@@ -48,7 +48,8 @@ pub const MAPS: [Map; 4] = [
         support: Support::Experimental,
         badge: "Plays · no extraction",
         note: "Loads and plays (moving, swimming), but the server still uses Dione's zones and evacuation: the helicopter \
-               appears outside the final zone and too high to reach. For testing only.",
+               appears outside the final zone and too high to reach. You can't pick a landing point, and the starting \
+               packs are Dione's (a snowboard instead of the BMX, which slides on grass and sand too). For testing only.",
     },
     Map {
         name: "Desert",

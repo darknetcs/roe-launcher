@@ -143,6 +143,9 @@ pub struct Config {
     /// Let other launchers on the network join this computer's server (`relay`); implies being visible. The
     /// server then runs with `--lan-tunnel` and this computer can't play at the same time. Off by default.
     pub lan_host: bool,
+    /// Computers asked directly on every Server Browser refresh (IP addresses), e.g. Hamachi or Radmin VPN peers the
+    /// network search can't see.
+    pub lan_hosts: Vec<String>,
     /// The name other launchers see; empty = a default.
     pub lan_name: String,
     /// Discord Rich Presence ("Playing Ring of Elysium"); off until the player switches it on.
@@ -180,6 +183,7 @@ impl Default for Config {
             lan_search: true,
             lan_visible: false,
             lan_host: false,
+            lan_hosts: Vec::new(),
             lan_name: String::new(),
             discord_presence: false,
             player_name: crate::playername::DEFAULT.into(),
