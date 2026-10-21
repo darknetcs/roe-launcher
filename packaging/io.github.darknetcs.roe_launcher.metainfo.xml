@@ -47,7 +47,7 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="0.1.11" date="2026-10-22">
+    <release version="0.1.11" date="2026-10-21">
       <description>
         <p>LAN play over Hamachi and Radmin VPN with hosts by address, updates that also refresh the documents, and
         an automatic VirusTotal scan of every release.</p>

@@ -3,7 +3,7 @@
 All notable changes to roe-launcher. Full release notes and downloads:
 <https://github.com/darknetcs/roe-launcher/releases>.
 
-## v0.1.11 — unreleased
+## v0.1.11 — 2026-10-21
 
 * **LAN play over Hamachi and Radmin VPN:** hosts accept players with Hamachi (25.x.x.x) and Radmin VPN (26.x.x.x)
   addresses, and **Server Browser → Hosts by address** lets players add a host's address so it's found without the
@@ -13,6 +13,16 @@ All notable changes to roe-launcher. Full release notes and downloads:
 * **VirusTotal:** every release is scanned automatically by VirusTotal; the results and report links are on its
   release page.
 * Kill Zone's tooltip explains that you can't pick a landing point and get Dione's starting packs.
+* **Tidier pages:**
+  * Server Settings now reads server status, Network, Player name, Map, Session, Match options. The match
+    options start collapsed.
+  * The server status shows the players on the server (e.g. "players 1/1").
+  * "Stop the server when the game closes" sits under Start / Stop.
+  * The hosting switches moved from the Server Browser to Server Settings → Network.
+  * The server folder moved to Game & Proton, next to the game folder.
+  * "Start server only" opens Server Settings.
+  * The duplicate "Server output" box is gone (it's all on the Logs page).
+* **Logs → Export…** saves a copy of the launcher log wherever you like, e.g. for a bug report.
 
 ## v0.1.10 — 2026-10-21
 
