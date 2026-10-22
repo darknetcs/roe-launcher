@@ -267,8 +267,9 @@ mod tests {
         assert!(check_files_against(&tmp.path().join("nowhere"), list).mostly_missing());
 
         // the built-in list: the supported exe and the world data are in it, game-written files are not
-        assert!(GAME_FILES.contains("27855816\tEuropa_Client.exe\n"));
-        assert!(GAME_FILES.contains(WORLD_DATA));
+        // compare lines, not raw text: a Windows checkout may give the file CRLF line ends (see .gitattributes)
+        assert!(GAME_FILES.lines().any(|l| l.trim_end() == "27855816\tEuropa_Client.exe"));
+        assert!(GAME_FILES.lines().any(|l| l.trim_end().ends_with(WORLD_DATA)));
         assert!(!GAME_FILES.to_lowercase().contains("userdata/") && !GAME_FILES.contains(".dmp"));
         let g = tmp.path().join("game");
         fake_game(&g);

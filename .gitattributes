@@ -1,0 +1,2 @@
+# The built-in game file list is read as text; keep its line ends the same on every machine (also Windows CI).
+crates/roe-core/src/game_files.txt text eol=lf
