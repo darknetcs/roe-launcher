@@ -204,6 +204,40 @@ fn ensure_portable(dir: &Path, sink: &Sink) -> Result<Prepared> {
     Ok(Prepared { python, dotnet, dotnet_root: Some(dotnet_home) })
 }
 
+/// The venv's Python can run pip.
+fn has_pip(python: &Path) -> bool {
+    Command::new(python)
+        .args(["-m", "pip", "--version"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+const VENV_HELP: &str = "on Debian, Ubuntu, Zorin or Mint: sudo apt install python3-venv";
+
+/// Creates the venv, or creates it again when it has no pip. On Debian-based systems `python -m venv` without the
+/// python3-venv package fails half way and leaves a venv with Python but no pip; installing the package later
+/// doesn't repair that venv, so it would fail on every start.
+fn prepare_venv(sys_python: &Path, venv: &Path, python: &Path, sink: &Sink) -> Result<()> {
+    if python.is_file() && has_pip(python) {
+        return Ok(());
+    }
+    if python.is_file() {
+        sink("The Python environment has no pip (made before python3-venv was installed?): creating it again…".into());
+        fs::remove_dir_all(venv).with_context(|| format!("removing the broken venv {}", venv.display()))?;
+    } else {
+        sink("Creating the Python environment…".into());
+    }
+    run_logged(Command::new(sys_python).args(["-m", "venv"]).arg(venv), sink)
+        .with_context(|| format!("creating the Python environment ({VENV_HELP})"))?;
+    if !has_pip(python) {
+        bail!("the Python environment has no pip. Install python3-venv ({VENV_HELP}), then try again");
+    }
+    Ok(())
+}
+
 /// Linux: system Python 3.11+ with a venv, and a system or `.tools` .NET 8 SDK.
 fn ensure_venv(dir: &Path, sink: &Sink) -> Result<Prepared> {
     let tools = dir.join(".tools");
@@ -212,11 +246,7 @@ fn ensure_venv(dir: &Path, sink: &Sink) -> Result<Prepared> {
     let sys_python = find_python().ok_or_else(|| anyhow!("Python 3.11 or newer is required (install python3 and python3-venv)"))?;
     let venv = tools.join("venv");
     let python = server_python(dir);
-    if !python.is_file() {
-        sink("Creating the Python environment…".into());
-        run_logged(Command::new(&sys_python).args(["-m", "venv"]).arg(&venv), sink)
-            .context("creating the venv (on Debian/Ubuntu install the python3-venv package)")?;
-    }
+    prepare_venv(&sys_python, &venv, &python, sink)?;
     let req = dir.join("requirements.txt");
     let want = sha256_hex(&req)?;
     let marker = venv.join("roe-dependencies.sha256");
@@ -251,6 +281,30 @@ fn ensure_venv(dir: &Path, sink: &Sink) -> Result<Prepared> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// A venv made without pip (what Debian leaves when python3-venv is missing) is made again, with pip.
+    #[test]
+    #[cfg(unix)]
+    fn a_venv_without_pip_is_made_again() {
+        let Some(sys) = find_python() else { return };
+        let tmp = tempfile::tempdir().unwrap();
+        let venv = tmp.path().join("venv");
+        let ok = Command::new(&sys).args(["-m", "venv", "--without-pip"]).arg(&venv).status().map(|s| s.success()).unwrap_or(false);
+        let python = venv.join("bin/python");
+        if !ok || !python.is_file() {
+            return; // this system's Python can't make venvs at all: nothing to test here
+        }
+        assert!(!has_pip(&python));
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let l = log.clone();
+        let sink: Sink = std::sync::Arc::new(move |m: String| l.lock().unwrap().push(m));
+        match prepare_venv(&sys, &venv, &python, &sink) {
+            Ok(()) => assert!(has_pip(&python)),
+            // a system without ensurepip (python3-venv missing) must get the clear message instead
+            Err(e) => assert!(format!("{e:#}").contains("python3-venv"), "{e:#}"),
+        }
+        assert!(log.lock().unwrap().iter().any(|m| m.contains("has no pip")));
+    }
 
     fn make_zip(path: &Path, entries: &[(&str, &[u8])]) {
         let mut w = zip::ZipWriter::new(fs::File::create(path).unwrap());

@@ -5,6 +5,12 @@ All notable changes to roe-launcher. Full release notes and downloads:
 
 ## Unreleased
 
+* **Linux: a Python environment without pip is repaired.** If the launcher first ran before `python3-venv` was
+  installed (Debian, Ubuntu, Zorin, Mint …), it was left with a half-made environment and failed with "No module
+  named pip" on every start, even after installing the package. It now notices and makes the environment again,
+  or says exactly which package to install.
+* **Server updates explain themselves:** the log says why the server files are downloaded, and leftover
+  `server.old` / `server.new` folders from an interrupted update are cleaned up at the next start.
 * **Game folder fixes** (reported by a player on Windows):
   * A game Steam marks as "update required" or "update paused" no longer leaves the launcher stuck on "Waiting for
     Steam to install Ring of Elysium…". Only Steam actually writing the files counts as installing.
