@@ -25,6 +25,11 @@ That project has not chosen a licence yet; check its status before redistributin
 ## Server
 The server itself is not included: the launcher downloads it from ROE-LIVE/ring-of-elysium-local at run time.
 
+## MLVP server work
+awpstar (GitHub: MLVP) gave written permission on 2026-10-22 to use https://github.com/MLVP/roe_server_previw, a
+server project they share with four others, in this launcher (its code, data files and ideas). Anything the
+launcher takes from it is credited to that project and its contributors.
+
 ## Third-party libraries
 The launcher is built from open-source Rust libraries (crates). Their licence notices are in
 `THIRD-PARTY-LICENSES.html`, which is generated for each release with `cargo-about` (see `about.toml`) and included in

@@ -287,6 +287,15 @@ launcher forwards TCP 28001 → 8001 and 29001 → 19001 (private addresses only
 127.0.0.1:8001 and :19001, forwards both to the host and runs upstream's bridge client, so the game connects to
 127.0.0.1:8001 as usual.
 
+## Credits
+
+* **[ROE-LIVE](https://github.com/ROE-LIVE/ring-of-elysium-local)** for the community local server the launcher
+  runs, and its profiles, LAN tunnel and translations.
+* **awpstar** ([MLVP](https://github.com/MLVP)) and the four people working with them on
+  [roe_server_previw](https://github.com/MLVP/roe_server_previw), for sharing their server work (user accounts,
+  lobby, map modes) and their permission to use it in the launcher.
+* Everyone in the community who tested, reported bugs and sent screenshots: they shaped every release.
+
 ## Artwork, font and licence
 
 The code is MIT-licensed (`LICENSE`); contributions are welcome (`CONTRIBUTING.md`). The launcher is built from
