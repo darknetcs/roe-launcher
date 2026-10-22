@@ -128,7 +128,44 @@ pub fn write_info(dir: &Path, info: &InstallInfo) -> Result<()> {
 
 /// A usable server checkout (what play-server.sh checks for).
 pub fn is_installed(dir: &Path) -> bool {
-    dir.join("requirements.txt").is_file() && dir.join("tools/windows_launch.py").is_file()
+    missing(dir).is_none()
+}
+
+/// Why the server folder isn't usable, in words for the log; None = it is.
+pub fn missing(dir: &Path) -> Option<String> {
+    if !dir.is_dir() {
+        return Some(format!("{} doesn't exist yet", dir.display()));
+    }
+    ["requirements.txt", "tools/windows_launch.py"]
+        .iter()
+        .find(|f| !dir.join(f).is_file())
+        .map(|f| format!("{} is incomplete: {f} is missing", dir.display()))
+}
+
+/// What an update leaves next to the server folder when it can't clean up (on Windows: a file still in use, e.g.
+/// by antivirus): `<dir>.old` (the previous files; the user's data was moved out) and an unpacked `<dir>.new`.
+/// Removes them and returns a line for the log per folder, removed or not. `<dir>.new` only when it is over an
+/// hour old, so a download running in another launcher window is left alone. Call it while no server runs.
+pub fn remove_leftovers(dir: &Path) -> Vec<String> {
+    let hour_old = |p: &Path| {
+        fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age.as_secs() > 3600)
+    };
+    let mut out = Vec::new();
+    for (ext, check_age) in [("old", false), ("new", true)] {
+        let p = dir.with_extension(ext);
+        if !p.is_dir() || (check_age && !hour_old(&p)) {
+            continue;
+        }
+        out.push(match fs::remove_dir_all(&p) {
+            Ok(()) => format!("Removed {}, left over from an earlier server update.", p.display()),
+            Err(e) => format!(
+                "Could not remove {} ({e}), left over from a server update. It holds no saved data: delete it by hand, \
+                 or the launcher tries again next start.",
+                p.display()
+            ),
+        });
+    }
+    out
 }
 
 pub fn update_available(info: Option<&InstallInfo>, remote: &Remote) -> bool {
@@ -211,6 +248,15 @@ pub fn install(dir: &Path, sha: &str, sink: &Sink) -> Result<()> {
         bail!("the download does not look like ring-of-elysium-local");
     }
     swap_in(&fresh, dir)?;
+    // swap_in tries to delete the previous files; say so when that failed instead of leaving a silent copy
+    let old = dir.with_extension("old");
+    if old.exists() {
+        sink(format!(
+            "The update worked, but {} could not be removed yet (a file in it may still be in use). It holds no saved data; \
+             the launcher tries again next start.",
+            old.display()
+        ));
+    }
     write_info(
         dir,
         &InstallInfo {
@@ -276,6 +322,36 @@ mod tests {
         assert!(!dir.join("stale.txt").exists());
         assert_eq!(fs::read_to_string(dir.join("requirements.txt")).unwrap(), "new");
         assert!(!tmp.path().join("server.old").exists() && !fresh.exists());
+    }
+
+    #[test]
+    fn says_why_the_server_folder_is_unusable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("server");
+        assert!(missing(&dir).unwrap().ends_with("doesn't exist yet"));
+        fs::create_dir_all(dir.join("tools")).unwrap();
+        fs::write(dir.join("requirements.txt"), "x").unwrap();
+        assert!(missing(&dir).unwrap().ends_with("tools/windows_launch.py is missing"));
+        fs::write(dir.join("tools/windows_launch.py"), "x").unwrap();
+        assert_eq!(missing(&dir), None);
+        assert!(is_installed(&dir));
+    }
+
+    #[test]
+    fn cleans_up_what_an_update_left_behind() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("server");
+        fs::create_dir_all(&dir).unwrap();
+        assert!(remove_leftovers(&dir).is_empty());
+        fs::create_dir_all(tmp.path().join("server.old/tools")).unwrap();
+        fs::write(tmp.path().join("server.old/tools/windows_launch.py"), "x").unwrap();
+        // a fresh server.new may be another window's download in progress: left alone
+        fs::create_dir_all(tmp.path().join("server.new")).unwrap();
+        let log = remove_leftovers(&dir);
+        assert_eq!(log.len(), 1, "{log:?}");
+        assert!(log[0].starts_with("Removed ") && log[0].contains("server.old"));
+        assert!(!tmp.path().join("server.old").exists() && tmp.path().join("server.new").exists());
+        assert!(dir.is_dir());
     }
 
     #[test]

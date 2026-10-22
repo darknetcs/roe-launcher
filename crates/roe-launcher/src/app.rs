@@ -305,6 +305,7 @@ impl App {
         app.refresh_info();
         app.load_schema();
         app.prune_session_logs();
+        app.remove_update_leftovers();
         if app.cfg.check_updates_on_start {
             app.check_updates();
         }
@@ -831,6 +832,7 @@ impl App {
         let (sink, tx, ctx) = (self.sink(Src::Launcher), self.tx.clone(), self.ctx.clone());
         std::thread::spawn(move || {
             let res = (|| -> anyhow::Result<Option<translate::Report>> {
+                sink("Updating the server files (Updates page).".into());
                 let remote = update::remote_head()?;
                 update::install(&dir, &remote.sha, &sink)?;
                 translate_step(&dir, do_tr, &sink)
@@ -868,7 +870,8 @@ impl App {
             let res = (|| -> anyhow::Result<()> {
                 let dir = cfg.server_dir_or_default();
                 if !already && !remote {
-                    if !update::is_installed(&dir) {
+                    if let Some(why) = update::missing(&dir) {
+                        l_sink(format!("Server files needed: {why}. Downloading them."));
                         stage("Downloading the server files from GitHub…");
                         let remote = update::remote_head()?;
                         update::install(&dir, &remote.sha, &l_sink)?;
@@ -972,6 +975,17 @@ impl App {
             Ok(_) => self.ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Err(e) => self.log(Src::Launcher, format!("Could not start the new launcher ({}): {e}", exe.display())),
         }
+    }
+
+    /// Removes server.old / server.new that an earlier update couldn't (see update::remove_leftovers), at start,
+    /// only while no server runs.
+    pub fn remove_update_leftovers(&mut self) {
+        if self.server_running() || server::ports().proxy {
+            return;
+        }
+        let dir = self.cfg.server_dir_or_default();
+        let sink = self.sink(Src::Launcher);
+        std::thread::spawn(move || update::remove_leftovers(&dir).into_iter().for_each(|line| sink(line)));
     }
 
     /// Deletes the oldest session logs (Server Settings > Session), only while no server runs.
@@ -1114,7 +1128,8 @@ impl App {
                     );
                 }
                 let dir = cfg.server_dir_or_default();
-                if !update::is_installed(&dir) {
+                if let Some(why) = update::missing(&dir) {
+                    l_sink(format!("Server files needed: {why}. Downloading them."));
                     stage("Downloading the server files from GitHub…");
                     let remote = update::remote_head()?;
                     update::install(&dir, &remote.sha, &l_sink)?;
