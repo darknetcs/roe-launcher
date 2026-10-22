@@ -5,10 +5,15 @@ All notable changes to roe-launcher. Full release notes and downloads:
 
 ## Unreleased
 
-* **Linux: a Python environment without pip is repaired.** If the launcher first ran before `python3-venv` was
-  installed (Debian, Ubuntu, Zorin, Mint …), it was left with a half-made environment and failed with "No module
-  named pip" on every start, even after installing the package. It now notices and makes the environment again,
-  or says exactly which package to install.
+* **Linux: no more "No module named pip".** If the launcher first ran before `python3-venv` was installed (Debian,
+  Ubuntu, Zorin, Mint …), it was left with a half-made Python environment and failed on every start, even after
+  installing the package. It now removes that environment and makes it again, and if `python3-venv` is missing
+  it sets up pip itself with PyPA's get-pip.py, so the setup goes on without it. The README's Linux quick start
+  now lists `python3-venv`.
+* **Game files check:** the Game page compares the game folder with the 299 files Steam ships for the supported
+  build (names and sizes, in milliseconds): "All game files present", or how many are missing or damaged, with
+  the full list in the log and how to repair them in Steam. A folder with Europa_Client.exe but most of the game
+  missing (an exe copied on its own) is not accepted as the game folder, and the search looks further.
 * **Server updates explain themselves:** the log says why the server files are downloaded, and leftover
   `server.old` / `server.new` folders from an interrupted update are cleaned up at the next start.
 * **Game folder fixes** (reported by a player on Windows):

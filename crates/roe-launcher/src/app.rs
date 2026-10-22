@@ -70,6 +70,8 @@ pub enum Event {
     JoinUp(relay::JoinRelay, String),
     FlowDone(Result<(), String>),
     Build(PathBuf, Result<Build, String>),
+    /// The shipped game files found in that folder (game::check_files).
+    Files(PathBuf, game::FileCheck),
     Picked(Pick, Option<PathBuf>),
     /// Servers found by the network sources (LAN, directory), and one message per failed source.
     Servers(Vec<ServerEntry>, Vec<String>),
@@ -139,6 +141,8 @@ pub struct App {
     pub detected_game: Option<PathBuf>,
     pub game_input: String,
     pub build: Option<(PathBuf, Result<Build, String>)>,
+    /// Which shipped game files the game folder has (names and sizes), checked with the build.
+    pub files: Option<game::FileCheck>,
     build_for: Option<PathBuf>,
 
     // processes
@@ -239,6 +243,7 @@ impl App {
             detected_game: None,
             game_input: String::new(),
             build: None,
+            files: None,
             build_for: None,
             server: None,
             client: None,
@@ -442,6 +447,15 @@ impl App {
                 Event::Build(p, r) => {
                     if self.cfg.game_dir.as_ref() == Some(&p) {
                         self.build = Some((p, r));
+                    }
+                }
+                Event::Files(p, c) => {
+                    if self.cfg.game_dir.as_ref() == Some(&p) {
+                        if !c.complete() {
+                            let shown: Vec<&str> = c.missing.iter().chain(&c.different).take(10).map(String::as_str).collect();
+                            self.log(Src::Launcher, format!("{} of {} game files missing or a different size, e.g.: {}", c.problems(), c.total, shown.join(", ")));
+                        }
+                        self.files = Some(c);
                     }
                 }
                 Event::Picked(kind, path) => {
@@ -1321,9 +1335,12 @@ impl App {
         if self.cfg.game_dir != self.build_for {
             self.build_for = self.cfg.game_dir.clone();
             self.build = None;
+            self.files = None;
             if let Some(p) = self.cfg.game_dir.clone().filter(|p| game::is_game_dir(p)) {
                 let (tx, c2) = (self.tx.clone(), self.ctx.clone());
                 std::thread::spawn(move || {
+                    // names and sizes first (milliseconds), then the exe's hash (a second or two)
+                    App::emit(&tx, &c2, Event::Files(p.clone(), game::check_files(&p)));
                     let r = game::check_build(&p).map_err(|e| e.to_string());
                     App::emit(&tx, &c2, Event::Build(p, r));
                 });

@@ -30,7 +30,7 @@ installs nothing outside the folders above.
 | At start (can be switched off on the Updates page) and on **Check** | `github.com`, `api.github.com` (repository `darknetcs/roe-launcher`) | Is a newer launcher available? | A normal web request; no personal data |
 | **Update now** | `github.com` / `objects.githubusercontent.com` | Download the new launcher and its checksum | as above |
 | First start and server updates | `github.com`, `codeload.github.com` (repository `ROE-LIVE/ring-of-elysium-local`) | Check for and download the community server files | as above |
-| First start (preparing the server) | `www.python.org` (Windows), `bootstrap.pypa.io`, `pypi.org` / `files.pythonhosted.org` | Python and the server's Python packages | as above |
+| First start (preparing the server) | `www.python.org` (Windows), `bootstrap.pypa.io` (Windows; Linux only without `python3-venv`), `pypi.org` / `files.pythonhosted.org` | Python and the server's Python packages | as above |
 | First start (preparing the server) | `dot.net` / `dotnet.microsoft.com` / `aka.ms` and Microsoft's download servers | The .NET 8 SDK the server needs | as above |
 | Only if you set an online server list URL (Server Browser) | the address you entered | Fetch that list | as above |
 | **Discord** / **GitHub** buttons | your web browser opens the page | – | – |

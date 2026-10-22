@@ -947,6 +947,7 @@ impl App {
                         Some(Err(e)) => status_line(ui, pal.warn, format!("Could not hash the executable: {e}")),
                         None => status_line(ui, pal.muted, "Checking the executable…"),
                     }
+                    self.game_files_line(ui, pal);
                 }
                 _ => {
                     if self.steam_installing {
@@ -1061,6 +1062,25 @@ impl App {
             });
             ui.label(RichText::new("Automatic = the game's own Steam prefix when there is one, otherwise a private prefix the launcher creates.").size(12.5).color(pal.muted));
         });
+    }
+
+    /// The shipped-files check under the game folder: complete, or what's missing and how to repair it.
+    fn game_files_line(&self, ui: &mut Ui, pal: &Palette) {
+        let Some(c) = &self.files else {
+            status_line(ui, pal.muted, "Checking the game files…");
+            return;
+        };
+        if c.complete() {
+            status_line(ui, pal.good, format!("All game files present ({})", c.total));
+            return;
+        }
+        let example = c.missing.first().or(c.different.first()).cloned().unwrap_or_default();
+        status_line(ui, pal.warn, format!("{} of {} game files missing or damaged, e.g. {example}", c.problems(), c.total));
+        ui.label(
+            RichText::new("Repair them in Steam: Library, Ring of Elysium, Properties, Installed Files, Verify integrity of game files. The full list is on the Logs page.")
+                .size(12.5)
+                .color(pal.muted),
+        );
     }
 
     /// Shown when no game is found: ask Steam to install it, then wait for the download.

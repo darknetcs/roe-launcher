@@ -217,24 +217,40 @@ fn has_pip(python: &Path) -> bool {
 
 const VENV_HELP: &str = "on Debian, Ubuntu, Zorin or Mint: sudo apt install python3-venv";
 
-/// Creates the venv, or creates it again when it has no pip. On Debian-based systems `python -m venv` without the
-/// python3-venv package fails half way and leaves a venv with Python but no pip; installing the package later
-/// doesn't repair that venv, so it would fail on every start.
+/// Makes sure the venv exists and has pip.
+///
+/// On Debian-based systems (Ubuntu, Zorin, Mint …) `python -m venv` without the python3-venv package fails half way
+/// and leaves a venv with Python but no pip; installing the package later doesn't repair it. So: a venv without
+/// pip is removed and made again; and when that still gives no pip (the package is missing), the venv is made
+/// without pip and pip is installed with PyPA's get-pip.py, so the setup goes on without python3-venv.
 fn prepare_venv(sys_python: &Path, venv: &Path, python: &Path, sink: &Sink) -> Result<()> {
     if python.is_file() && has_pip(python) {
         return Ok(());
     }
-    if python.is_file() {
-        sink("The Python environment has no pip (made before python3-venv was installed?): creating it again…".into());
-        fs::remove_dir_all(venv).with_context(|| format!("removing the broken venv {}", venv.display()))?;
+    if venv.exists() {
+        sink("The Python environment has no pip (made before python3-venv was installed?): making it again…".into());
+        fs::remove_dir_all(venv).with_context(|| format!("removing the broken Python environment {}", venv.display()))?;
     } else {
         sink("Creating the Python environment…".into());
     }
-    run_logged(Command::new(sys_python).args(["-m", "venv"]).arg(venv), sink)
-        .with_context(|| format!("creating the Python environment ({VENV_HELP})"))?;
-    if !has_pip(python) {
-        bail!("the Python environment has no pip. Install python3-venv ({VENV_HELP}), then try again");
+    let normal = run_logged(Command::new(sys_python).args(["-m", "venv"]).arg(venv), sink);
+    if normal.is_ok() && has_pip(python) {
+        return Ok(());
     }
+    // python3-venv is missing: the attempt above left a venv without pip; start clean and bring pip ourselves
+    sink(format!("python3-venv isn't installed, so Python can't set up pip by itself. Setting it up with get-pip.py from {GET_PIP_URL}…"));
+    let _ = fs::remove_dir_all(venv);
+    run_logged(Command::new(sys_python).args(["-m", "venv", "--without-pip"]).arg(venv), sink)
+        .with_context(|| format!("creating the Python environment ({VENV_HELP})"))?;
+    let script = venv.join("get-pip.py");
+    download(GET_PIP_URL, &script).with_context(|| format!("downloading get-pip.py (or install python3-venv: {VENV_HELP})"))?;
+    let installed = run_logged(Command::new(python).arg(&script).args(["--disable-pip-version-check", "--no-warn-script-location"]), sink);
+    let _ = fs::remove_file(&script);
+    if installed.is_err() || !has_pip(python) {
+        let _ = fs::remove_dir_all(venv);
+        bail!("could not set up pip for the Python environment. Install python3-venv ({VENV_HELP}), then try again");
+    }
+    sink("pip is set up.".into());
     Ok(())
 }
 
@@ -281,6 +297,22 @@ fn ensure_venv(dir: &Path, sink: &Sink) -> Result<Prepared> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// Without python3-venv (simulated: a Python that can't make pip, see the container check in the notes) the venv
+    /// still gets pip, from get-pip.py. Needs the internet: `cargo test -p roe-core -- --ignored live_get_pip`.
+    #[test]
+    #[ignore]
+    #[cfg(unix)]
+    fn live_get_pip_sets_up_pip_without_ensurepip() {
+        let sys = find_python().expect("python3");
+        let tmp = tempfile::tempdir().unwrap();
+        let venv = tmp.path().join("venv");
+        let python = venv.join("bin/python");
+        Command::new(&sys).args(["-m", "venv", "--without-pip"]).arg(&venv).status().unwrap();
+        download(GET_PIP_URL, &tmp.path().join("get-pip.py")).unwrap();
+        let st = Command::new(&python).arg(tmp.path().join("get-pip.py")).args(["-q", "--disable-pip-version-check"]).status().unwrap();
+        assert!(st.success() && has_pip(&python));
+    }
 
     /// A venv made without pip (what Debian leaves when python3-venv is missing) is made again, with pip.
     #[test]

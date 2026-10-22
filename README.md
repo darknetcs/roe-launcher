@@ -32,11 +32,21 @@ third-party licences (`THIRD-PARTY-LICENSES.html` in every package) · [Notices]
 ## Quick start
 
 ### Linux
+On **Debian, Ubuntu, Zorin, Mint, Pop!\_OS** and other Debian-based systems, install Python's venv module first
+(Fedora, Arch, openSUSE and SteamOS include it with Python):
+```bash
+sudo apt install python3 python3-venv
+```
+Then:
 ```bash
 tar xf roe-launcher-linux-x86_64.tar.gz
 ./roe-launcher/roe-launcher
 ```
 A `roe-launcher.desktop` file is included if you want a menu entry.
+
+If you started the launcher before installing `python3-venv` and it failed with *"No module named pip"*, just press
+**PLAY** again: the launcher repairs its Python environment by itself (versions after v0.1.11; with v0.1.11 or older,
+delete `~/.local/share/roe-local/server/.tools/venv` first).
 
 ### Windows
 1. Unzip `roe-launcher-windows-x86_64.zip` anywhere you can write to (e.g. `Documents\roe-launcher`).
@@ -77,7 +87,8 @@ The first start downloads what the server needs (a few hundred MB), then startup
 
 **Linux**
 * A desktop with OpenGL (Mesa or a vendor driver), X11 or Wayland.
-* `python3` ≥ 3.11 **with venv** (Debian/Ubuntu: `sudo apt install python3 python3-venv`).
+* `python3` ≥ 3.11 **with venv** (Debian, Ubuntu, Zorin, Mint …: `sudo apt install python3 python3-venv`). Without
+  `python3-venv` the launcher still sets up pip itself, with PyPA's `get-pip.py`.
 * Steam + a Proton runtime (GE-Proton recommended; `GE-Proton11-7` is the tested one).
 * `xdg-desktop-portal` for the file dialogs (present on all mainstream desktops).
 
@@ -85,7 +96,8 @@ The first start downloads what the server needs (a few hundred MB), then startup
 * Windows 10 or 11, 64-bit, with an OpenGL-capable graphics driver (any current GPU driver).
 * Steam with the game installed. Nothing else: Python and .NET are downloaded by the launcher.
 
-**Both:** internet access on the first start (GitHub, PyPI, python.org on Windows, Microsoft's .NET download).
+**Both:** internet access on the first start (GitHub, PyPI, python.org on Windows, Microsoft's .NET download; on Linux
+without `python3-venv` also bootstrap.pypa.io).
 
 ## Where things live
 
