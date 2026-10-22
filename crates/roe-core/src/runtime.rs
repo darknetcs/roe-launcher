@@ -330,7 +330,13 @@ mod tests {
         let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let l = log.clone();
         let sink: Sink = std::sync::Arc::new(move |m: String| l.lock().unwrap().push(m));
-        match prepare_venv(&sys, &venv, &python, &sink) {
+        let result = prepare_venv(&sys, &venv, &python, &sink);
+        // ROE_EXPECT_PIP=1 (e.g. in a container without python3-venv but with internet): only success counts
+        if std::env::var_os("ROE_EXPECT_PIP").is_some() {
+            assert!(result.is_ok() && has_pip(&python), "{result:?} {:?}", log.lock().unwrap());
+            println!("pip set up; log: {:?}", log.lock().unwrap());
+        }
+        match result {
             Ok(()) => assert!(has_pip(&python)),
             // a system without ensurepip (python3-venv missing) must get the clear message instead
             Err(e) => assert!(format!("{e:#}").contains("python3-venv"), "{e:#}"),
