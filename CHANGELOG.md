@@ -5,6 +5,11 @@ All notable changes to roe-launcher. Full release notes and downloads:
 
 ## Unreleased
 
+* **"Stop the server when the game closes" works while the launcher is minimised.** The launcher only did its
+  checks while its window updated, and a minimised window doesn't (on Wayland at least), so the server kept running
+  until you next touched the launcher. A background watcher now notices the end of the game, logs it and stops the
+  server at once. Log lines also reach `launcher.log` at once, instead of when the window next updates.
+
 * **Block Tencent's crash reporter** (Game page, off by default): the game starts TQMCenter, Tencent's crash and
   telemetry collector, which can send crash reports and system details to Tencent. The launcher can now stop it
   from starting, without changing any game file (Windows: a "deny run" permission; Linux: no read permission), and

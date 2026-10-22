@@ -61,6 +61,10 @@ pub enum Pick {
 
 pub enum Event {
     Log(Src, String),
+    /// A line a background sink wrote to launcher.log already: only for the Logs page.
+    Logged(Src, String),
+    /// The game ended; the watcher (`watch_game`) logged it and stopped our server if wanted.
+    GameClosed,
     Stage(Option<String>),
     Remote(Result<Remote, String>),
     Updated(Result<Option<translate::Report>, String>),
@@ -155,6 +159,8 @@ pub struct App {
     pub server: Option<Handle>,
     pub client: Option<Handle>,
     pub server_ours: bool,
+    /// Shared with the game watcher (`watch_game`).
+    game_watch: Arc<GameWatch>,
     pub ports: Ports,
     /// Players on the running server (from its lobby log), refreshed with the ports; None = no server.
     pub players: Option<u32>,
@@ -189,7 +195,9 @@ pub struct App {
     pub logs: VecDeque<(Src, String)>,
     pub log_show: [bool; 3],
     /// The same lines, written to `<data dir>/launcher.log` (replaced on every start).
-    log_file: Option<std::io::LineWriter<std::fs::File>>,
+    /// launcher.log, shared with background work (`sink`), so lines reach the file at once, also while the window
+    /// is minimised and doesn't update.
+    log_file: LogFile,
 
     // look & feel
     pub logo: egui::TextureHandle,
@@ -259,6 +267,7 @@ impl App {
             server: None,
             client: None,
             server_ours: false,
+            game_watch: Arc::default(),
             ports: Ports::default(),
             players: None,
             last_poll: Instant::now() - Duration::from_secs(5),
@@ -281,7 +290,7 @@ impl App {
             exe: selfupdate::current_exe(),
             logs: VecDeque::new(),
             log_show: [true; 3],
-            log_file: open_log_file(),
+            log_file: Arc::new(Mutex::new(open_log_file())),
             logo: tex(&cc.egui_ctx, "logo", assets::LOGO),
 
             bg: None,
@@ -350,15 +359,12 @@ impl App {
 
     // ---------- logging / events ----------
     pub fn log(&mut self, src: Src, text: String) {
-        if let Some(f) = self.log_file.as_mut() {
-            use std::io::Write;
-            let tag = match src {
-                Src::Launcher => "launcher",
-                Src::Server => "server",
-                Src::Client => "game",
-            };
-            let _ = writeln!(f, "[{tag}] {text}");
-        }
+        write_log_line(&self.log_file, src, &text);
+        self.show_log(src, text);
+    }
+
+    /// Adds a line to the Logs page only (it's in launcher.log already).
+    fn show_log(&mut self, src: Src, text: String) {
         self.logs.push_back((src, text));
         while self.logs.len() > MAX_LOG {
             self.logs.pop_front();
@@ -366,9 +372,10 @@ impl App {
     }
 
     pub fn sink(&self, src: Src) -> Sink {
-        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        let (tx, ctx, file) = (self.tx.clone(), self.ctx.clone(), self.log_file.clone());
         Arc::new(move |l| {
-            let _ = tx.send(Event::Log(src, l));
+            write_log_line(&file, src, &l);
+            let _ = tx.send(Event::Logged(src, l));
             ctx.request_repaint();
         })
     }
@@ -382,6 +389,9 @@ impl App {
         while let Ok(ev) = self.rx.try_recv() {
             match ev {
                 Event::Log(s, t) => self.log(s, t),
+                Event::Logged(s, t) => self.show_log(s, t),
+                // only wakes the window: tick() still sees running → stopped and closes a LAN join
+                Event::GameClosed => {}
                 Event::Stage(s) => self.stage = s,
                 Event::Remote(r) => {
                     self.checking = false;
@@ -407,6 +417,9 @@ impl App {
                     }
                 }
                 Event::ServerUp(h) => {
+                    if let Ok(mut s) = self.game_watch.server.lock() {
+                        *s = Some(h.clone());
+                    }
                     self.server = Some(h);
                     self.server_ours = true;
                 }
@@ -964,6 +977,8 @@ impl App {
         self.stage = Some("Starting…".into());
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         let (s_sink, c_sink, l_sink) = (self.sink(Src::Server), self.sink(Src::Client), self.sink(Src::Launcher));
+        let watch = self.game_watch.clone();
+        watch.stop_server_on_exit.store(self.cfg.stop_server_on_game_exit, Ordering::SeqCst);
         std::thread::spawn(move || {
             let stage = |s: &str| App::emit(&tx, &ctx, Event::Stage(Some(s.to_string())));
             let res = (|| -> anyhow::Result<()> {
@@ -1009,6 +1024,10 @@ impl App {
                         profile: cfg.profile.clone(),
                     };
                     let h = server::start(&prepared, &settings, s_sink)?;
+                    // the watcher must know our server even if the window doesn't update again before the game ends
+                    if let Ok(mut s) = watch.server.lock() {
+                        *s = Some(h.clone());
+                    }
                     App::emit(&tx, &ctx, Event::ServerUp(h.clone()));
                     let t = Instant::now();
                     loop {
@@ -1027,6 +1046,7 @@ impl App {
                 if with_client {
                     stage("Starting the game…");
                     let h = start_game(&cfg, &game_dir, proton.as_ref(), &cfg.connection.address(), c_sink)?;
+                    watch_game(h.clone(), watch.clone(), true, l_sink.clone(), tx.clone(), ctx.clone());
                     App::emit(&tx, &ctx, Event::ClientUp(h));
                 }
                 Ok(())
@@ -1216,6 +1236,8 @@ impl App {
         self.stage = Some(format!("Connecting to {}…", e.name));
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         let (s_sink, c_sink, l_sink) = (self.sink(Src::Server), self.sink(Src::Client), self.sink(Src::Launcher));
+        let watch = self.game_watch.clone();
+        watch.stop_server_on_exit.store(self.cfg.stop_server_on_game_exit, Ordering::SeqCst);
         std::thread::spawn(move || {
             let stage = |s: &str| App::emit(&tx, &ctx, Event::Stage(Some(s.to_string())));
             let res = (|| -> anyhow::Result<()> {
@@ -1251,6 +1273,7 @@ impl App {
                 App::emit(&tx, &ctx, Event::JoinUp(r, e.name.clone()));
                 stage("Starting the game…");
                 let h = start_game(&cfg, &game_dir, proton.as_ref(), Connection::LOCAL_ADDRESS, c_sink)?;
+                watch_game(h.clone(), watch.clone(), false, l_sink.clone(), tx.clone(), ctx.clone());
                 App::emit(&tx, &ctx, Event::ClientUp(h));
                 Ok(())
             })();
@@ -1377,15 +1400,9 @@ impl App {
         ctx.request_repaint_after(Duration::from_millis(if self.cfg.theme.effect == Effect::Off { 500 } else { 33 }));
 
         // game exited -> optionally stop the server we started
+        // (logging it and stopping our server is the watcher's job: see watch_game)
         let running = self.client_running();
-        if self.client_was_running && !running {
-            let code = self.client.as_ref().and_then(|h| h.exit_code());
-            self.log(Src::Launcher, format!("Game closed (exit code {}).", code.map(|c| c.to_string()).unwrap_or_else(|| "?".into())));
-            if self.cfg.stop_server_on_game_exit && self.server_ours && self.server_running() {
-                self.log(Src::Launcher, "Stopping the server (the game was closed).".into());
-                self.stop_server();
-            }
-        }
+        self.game_watch.stop_server_on_exit.store(self.cfg.stop_server_on_game_exit, Ordering::SeqCst);
         // leave a LAN host when its game stops (not before the game has started)
         if self.client_was_running && !running {
             if let Some((_, name)) = self.join.take() {
@@ -1500,6 +1517,49 @@ fn translate_step(dir: &Path, enabled: bool, sink: &Sink) -> anyhow::Result<Opti
     update::write_info(dir, &info)?;
     sink(format!("Translated {} files; {} lines of new upstream text are still Russian.", rep.files_changed, rep.untranslated));
     Ok(Some(rep))
+}
+
+type LogFile = Arc<Mutex<Option<std::io::LineWriter<std::fs::File>>>>;
+
+fn write_log_line(file: &LogFile, src: Src, text: &str) {
+    use std::io::Write;
+    let tag = match src {
+        Src::Launcher => "launcher",
+        Src::Server => "server",
+        Src::Client => "game",
+    };
+    if let Some(f) = file.lock().ok().as_mut().and_then(|f| f.as_mut()) {
+        let _ = writeln!(f, "[{tag}] {text}");
+    }
+}
+
+/// What the game watcher needs when the game ends, without waiting for the window (which doesn't update while
+/// minimised, e.g. during a match).
+#[derive(Default)]
+pub struct GameWatch {
+    /// The server the launcher started, stopped when the game closes if the setting says so.
+    server: Mutex<Option<Handle>>,
+    stop_server_on_exit: AtomicBool,
+}
+
+/// Waits for the game to end in the background, logs it and stops our server ("Stop the server when the game
+/// closes"); `stop_ours` is false for a game joined on a LAN host.
+fn watch_game(game: Handle, watch: Arc<GameWatch>, stop_ours: bool, sink: Sink, tx: Sender<Event>, ctx: egui::Context) {
+    std::thread::spawn(move || {
+        while game.is_running() {
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        let code = game.exit_code().map(|c| c.to_string()).unwrap_or_else(|| "?".into());
+        sink(format!("Game closed (exit code {code})."));
+        if stop_ours && watch.stop_server_on_exit.load(Ordering::SeqCst) {
+            let server = watch.server.lock().ok().and_then(|s| s.clone()).filter(|s| s.is_running());
+            if let Some(s) = server {
+                sink("Stopping the server (the game was closed).".into());
+                s.request_stop(Duration::from_secs(10));
+            }
+        }
+        App::emit(&tx, &ctx, Event::GameClosed);
+    });
 }
 
 fn open_log_file() -> Option<std::io::LineWriter<std::fs::File>> {
