@@ -109,6 +109,9 @@ impl Connection {
 #[serde(default)]
 pub struct Config {
     pub game_dir: Option<PathBuf>,
+    /// The player chose `game_dir` themselves (Browse or typed): Steam's install state is not checked for it,
+    /// until Auto-detect hands the choice back to Steam.
+    pub game_dir_manual: bool,
     pub proton: ProtonChoice,
     pub compat_data: Option<PathBuf>,
     /// Where the launcher keeps its own copy of the server files.
@@ -162,6 +165,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             game_dir: None,
+            game_dir_manual: false,
             proton: ProtonChoice::Latest(Kind::GeProton),
             compat_data: None,
             server_dir: None,

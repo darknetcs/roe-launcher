@@ -8,7 +8,9 @@ All notable changes to roe-launcher. Full release notes and downloads:
 * **Game folder fixes** (reported by a player on Windows):
   * A game Steam marks as "update required" or "update paused" no longer leaves the launcher stuck on "Waiting for
     Steam to install Ring of Elysium…". Only Steam actually writing the files counts as installing.
-  * A folder you choose yourself, or one outside your Steam libraries, is used even while Steam reports an install.
+  * A folder you choose yourself (Browse or typed) is remembered as yours: Steam's install state isn't checked for
+    it any more, also after a restart, until you press Auto-detect. A folder outside your Steam libraries is never
+    held up by Steam either.
   * When a folder isn't accepted, or Auto-detect finds nothing, the reason now shows under the field instead of
     only on the Logs page.
   * Choosing a parent folder or a renamed copy works: the launcher looks up to three folders deeper for

@@ -205,9 +205,6 @@ pub struct App {
     pub steam_installing: bool,
     /// Steam's StateFlags for the game (shown while waiting), if it has a manifest.
     pub steam_state: Option<u32>,
-    /// The player chose the game folder themselves (Browse or typed): it wins over Steam's install state, which
-    /// may describe another copy (e.g. a Steam install in another library).
-    game_chosen: bool,
     /// Why the last folder choice or Auto-detect found no game, shown under the folder field.
     pub game_error: Option<String>,
     /// `ROE_SCREENSHOT=<file.png>` (development): save the window after start-up, then close.
@@ -285,7 +282,6 @@ impl App {
             last_install_check: Instant::now(),
             steam_installing: false,
             steam_state: None,
-            game_chosen: false,
             game_error: None,
             screenshot: std::env::var_os("ROE_SCREENSHOT").map(PathBuf::from),
             frames: 0,
@@ -578,7 +574,7 @@ impl App {
             Ok(p) => {
                 self.game_input = p.display().to_string();
                 self.cfg.game_dir = Some(p);
-                self.game_chosen = true;
+                self.cfg.game_dir_manual = true;
                 self.game_error = None;
                 self.steam_installing = false;
                 self.install_wait = None;
@@ -593,7 +589,7 @@ impl App {
     /// Auto-detect: forget the player's choice and look in the Steam libraries again; say so when nothing is there.
     pub fn auto_detect_game(&mut self) {
         self.cfg.game_dir = None;
-        self.game_chosen = false;
+        self.cfg.game_dir_manual = false;
         self.game_error = None;
         self.detect();
         if self.cfg.game_dir.is_none() && !self.steam_installing {
@@ -609,11 +605,12 @@ impl App {
         }
     }
 
-    /// A game folder Steam's install state doesn't apply to: the player chose it themselves, or it lies outside
-    /// every Steam library (so Steam's manifest describes another copy).
+    /// A game folder Steam's install state doesn't apply to: the player chose it themselves (remembered in the
+    /// settings until Auto-detect), or it lies outside every Steam library, so Steam's manifest describes another
+    /// copy (this also covers folders chosen by hand before the setting existed).
     fn chosen_game_ok(&self) -> bool {
         let Some(dir) = self.cfg.game_dir.as_deref().filter(|d| game::is_game_dir(d)) else { return false };
-        self.game_chosen || !self.libs.iter().any(|lib| dir.starts_with(lib))
+        self.cfg.game_dir_manual || !self.libs.iter().any(|lib| dir.starts_with(lib))
     }
 
     pub fn resolved_proton(&self) -> Option<Runtime> {
