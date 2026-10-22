@@ -61,6 +61,9 @@ pub struct ServerEntry {
     /// A LAN host that lets others join: its [game, tunnel] relay ports (`relay`). Not saved.
     #[serde(skip)]
     pub relay: Option<[u16; 2]>,
+    /// A LAN host's server profile (see `profiles`), for the bridge when joining. Not saved.
+    #[serde(skip)]
+    pub profile: Option<String>,
     #[serde(skip)]
     pub source: Source,
 }
@@ -81,6 +84,7 @@ impl Default for ServerEntry {
             official: false,
             password: false,
             relay: None,
+            profile: None,
             source: Source::Saved,
         }
     }

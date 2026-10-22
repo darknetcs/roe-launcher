@@ -21,6 +21,8 @@ pub struct Settings {
     pub lan_tunnel: bool,
     /// Match options from the Server Settings page, already as arguments (see `options::to_args`).
     pub options: Vec<String>,
+    /// Server profile (`profiles`); "default" passes nothing, as before.
+    pub profile: String,
 }
 
 /// Newest `config/windows-smoke-*.json` (the name carries a date and changes upstream).
@@ -53,6 +55,9 @@ pub fn build_args(s: &Settings, dotnet: &Path) -> Vec<String> {
     }
     if s.lan_tunnel {
         a.push("--lan-tunnel".into());
+    }
+    if let Some(p) = crate::profiles::validate(&s.profile).ok().filter(|p| p != crate::profiles::DEFAULT) {
+        a.extend(["--profile".into(), p]);
     }
     a.extend(split_args(&s.extra_args).iter().map(|x| cmd_style_switch(x)));
     a
@@ -258,7 +263,7 @@ mod tests {
         for same in ["--practice-targets", "10", "-h", "-5", r"C:\x\loot.json", "/tmp/a", "-Odd-Name"] {
             assert_eq!(cmd_style_switch(same), same);
         }
-        let s = Settings { dir: "/s".into(), game_dir: "/g".into(), duration: 1500, extra_args: "-PracticeTargets 10 -LiveControl".into(), lan_tunnel: false, options: vec![] };
+        let s = Settings { dir: "/s".into(), game_dir: "/g".into(), duration: 1500, extra_args: "-PracticeTargets 10 -LiveControl".into(), lan_tunnel: false, options: vec![], profile: "default".into() };
         assert!(build_args(&s, Path::new("dotnet")).join(" ").ends_with("--practice-targets 10 --live-control"));
     }
 
@@ -276,6 +281,7 @@ mod tests {
             extra_args: "--foo 'a b'".into(),
             lan_tunnel: true,
             options: crate::options::to_args(&crate::options::launcher_defaults(), None),
+            profile: "default".into(),
         };
         let a = build_args(&s, Path::new("/usr/bin/dotnet"));
         let joined = a.join(" ");
@@ -290,5 +296,11 @@ mod tests {
         assert!(a.contains(&"/my.json".to_string()) && !a.iter().any(|x| x.ends_with("windows-smoke-20261101.json")));
         assert!(a.contains(&"--lan-tunnel".to_string()));
         assert_eq!(&a[a.len() - 2..], ["--foo", "a b"]);
+        // the default profile passes nothing (as before); another one passes --profile, in the server's form
+        assert!(!a.contains(&"--profile".to_string()));
+        let wojtek = Settings { profile: "Wojtek".into(), ..s.clone() };
+        assert!(build_args(&wojtek, Path::new("dotnet")).join(" ").contains("--profile wojtek"));
+        let bad = Settings { profile: "con".into(), ..s };
+        assert!(!build_args(&bad, Path::new("dotnet")).contains(&"--profile".to_string()));
     }
 }

@@ -156,6 +156,12 @@ pub struct Config {
     /// The in-game name (lobby, map selection, newspaper, stats); empty = upstream's names (the match then says
     /// "LOCAL"). New players start with `playername::DEFAULT`. See `playername`.
     pub player_name: String,
+    /// The server profile (`--profile`, see `profiles`): own character and appearance. "default" = the original.
+    pub profile: String,
+    /// Profiles made in the launcher (the server lists the ones it has saved itself).
+    pub profiles: Vec<String>,
+    /// Each profile's player name, so switching profiles also switches the name.
+    pub profile_names: std::collections::BTreeMap<String, String>,
     /// The map (`maps::MAPS`); anything not selectable falls back to Dione when the server starts.
     pub map_id: u32,
     pub theme: Theme,
@@ -191,6 +197,9 @@ impl Default for Config {
             lan_name: String::new(),
             discord_presence: false,
             player_name: crate::playername::DEFAULT.into(),
+            profile: crate::profiles::DEFAULT.into(),
+            profiles: Vec::new(),
+            profile_names: Default::default(),
             map_id: crate::maps::DIONE,
             theme: Theme::default(),
         }

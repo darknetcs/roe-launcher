@@ -39,11 +39,14 @@ pub struct Announcement {
     pub mode: Option<String>,
     /// Set when the host lets others join (see `relay`): its [game, tunnel] relay ports. Older launchers omit it.
     pub relay: Option<[u16; 2]>,
+    /// The server profile the host's server runs with: the joining bridge must use the same one (the server's LAN
+    /// tunnel refuses a different one). Older launchers omit it, meaning "default".
+    pub profile: Option<String>,
 }
 
 impl Default for Announcement {
     fn default() -> Self {
-        Self { protocol: PROTOCOL, instance: String::new(), name: String::new(), port: 8001, players: 0, max_players: 0, version: None, mode: None, relay: None }
+        Self { protocol: PROTOCOL, instance: String::new(), name: String::new(), port: 8001, players: 0, max_players: 0, version: None, mode: None, relay: None, profile: None }
     }
 }
 
@@ -69,6 +72,7 @@ pub fn parse_reply(bytes: &[u8], from: SocketAddr, skip_instance: Option<&str>) 
         version: a.version,
         mode: a.mode,
         relay: a.relay.filter(|p| p.iter().all(|&x| x != 0)),
+        profile: a.profile.and_then(|p| crate::profiles::validate(&p).ok()),
         source: Source::Lan,
         ..Default::default()
     })
@@ -224,6 +228,17 @@ impl Drop for Responder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_hosts_profile_reaches_the_joiner_in_the_servers_form() {
+        let from: SocketAddr = "192.168.1.20:18110".parse().unwrap();
+        let reply = |profile: Option<&str>| serde_json::to_vec(&Announcement { profile: profile.map(String::from), ..ann("h") }).unwrap();
+        assert_eq!(parse_reply(&reply(Some("Wojtek")), from, None).unwrap().profile.as_deref(), Some("wojtek"));
+        assert_eq!(parse_reply(&reply(Some("not ok!")), from, None).unwrap().profile, None);
+        // an older launcher doesn't send it at all: the joiner uses "default"
+        let old = br#"{"protocol":1,"instance":"o","name":"Old PC","port":8001,"players":0,"max_players":1}"#;
+        assert_eq!(parse_reply(old, from, None).unwrap().profile, None);
+    }
 
     fn ann(instance: &str) -> Announcement {
         Announcement { instance: instance.into(), name: "Living-room PC".into(), players: 1, max_players: 1, mode: Some("Training".into()), ..Default::default() }

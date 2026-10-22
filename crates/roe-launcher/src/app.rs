@@ -112,6 +112,8 @@ pub struct Browser {
     pub responder_error: Option<String>,
     /// Shared with the responder thread so a rename applies at once.
     lan_name: Arc<Mutex<String>>,
+    /// The profile our server was started with, announced so joining launchers use the same one.
+    server_profile: Arc<Mutex<String>>,
     /// Random per run: lets a search skip this launcher's own answer.
     instance: String,
     /// While hosting for the network (`cfg.lan_host` and our server runs): the relay to the server's loopback ports.
@@ -211,6 +213,10 @@ pub struct App {
     pub steam_state: Option<u32>,
     /// Why the last folder choice or Auto-detect found no game, shown under the folder field.
     pub game_error: Option<String>,
+    /// Profile picker: the "new profile" field, why its last name was refused, a profile waiting for delete confirmation.
+    pub profile_input: String,
+    pub profile_error: Option<String>,
+    pub profile_delete: Option<String>,
     /// `ROE_SCREENSHOT=<file.png>` (development): save the window after start-up, then close.
     screenshot: Option<PathBuf>,
     frames: u64,
@@ -288,6 +294,9 @@ impl App {
             steam_installing: false,
             steam_state: None,
             game_error: None,
+            profile_input: String::new(),
+            profile_error: None,
+            profile_delete: None,
             screenshot: std::env::var_os("ROE_SCREENSHOT").map(PathBuf::from),
             frames: 0,
             browser: Browser { instance: instance_id(), ..Default::default() },
@@ -620,6 +629,52 @@ impl App {
         }
     }
 
+    /// Switches the server profile; each profile keeps its own player name. Applies when the server next starts.
+    pub fn switch_profile(&mut self, name: &str) {
+        let Ok(new) = roe_core::profiles::validate(name) else { return };
+        if new == self.cfg.profile {
+            return;
+        }
+        let old = std::mem::replace(&mut self.cfg.profile, new.clone());
+        self.cfg.profile_names.insert(old, self.cfg.player_name.clone());
+        // a profile used for the first time starts with its own name as the player name (when that's a valid one)
+        let fallback = || if roe_core::playername::validate(&new).is_ok() { new.clone() } else { roe_core::playername::DEFAULT.into() };
+        self.cfg.player_name = self.cfg.profile_names.get(&new).cloned().unwrap_or_else(fallback);
+        self.log(Src::Launcher, format!("Profile: {new}. It's used from the next server start."));
+    }
+
+    /// Adds a profile made in the launcher and switches to it. Err = why the name isn't allowed.
+    pub fn create_profile(&mut self, name: &str) -> Result<(), String> {
+        let p = roe_core::profiles::validate(name)?;
+        if !self.cfg.profiles.contains(&p) && p != roe_core::profiles::DEFAULT {
+            self.cfg.profiles.push(p.clone());
+        }
+        self.switch_profile(&p);
+        Ok(())
+    }
+
+    /// Deletes a profile and its saved appearance on the server (never "default"; not while the server runs).
+    pub fn delete_profile(&mut self, name: &str) -> Result<(), String> {
+        if name == roe_core::profiles::DEFAULT {
+            return Err("The default profile can't be deleted.".into());
+        }
+        if self.server_running() {
+            return Err("Stop the server first.".into());
+        }
+        let folder = roe_core::profiles::folder(&self.cfg.server_dir_or_default(), name);
+        if folder.exists() {
+            std::fs::remove_dir_all(&folder).map_err(|e| format!("Could not delete {}: {e}", folder.display()))?;
+        }
+        self.cfg.profiles.retain(|p| p != name);
+        self.cfg.profile_names.remove(name);
+        if self.cfg.profile == name {
+            self.switch_profile(roe_core::profiles::DEFAULT);
+            self.cfg.profile_names.remove(name);
+        }
+        self.log(Src::Launcher, format!("Deleted the profile {name} and its saved appearance."));
+        Ok(())
+    }
+
     /// A game folder Steam's install state doesn't apply to: the player chose it themselves (remembered in the
     /// settings until Auto-detect), or it lies outside every Steam library, so Steam's manifest describes another
     /// copy (this also covers folders chosen by hand before the setting existed).
@@ -867,6 +922,11 @@ impl App {
         }
         let cfg = self.cfg.clone();
         let known: Option<Vec<ServerOption>> = self.schema.as_ref().and_then(|s| s.as_ref().ok()).cloned();
+        if let Ok(mut p) = self.browser.server_profile.lock() {
+            if !self.server_running() {
+                *p = roe_core::profiles::validate(&cfg.profile).unwrap_or_else(|_| roe_core::profiles::DEFAULT.into());
+            }
+        }
         // read the ports fresh: the cached status may be up to a second old (or not polled yet)
         self.ports = server::ports();
         let remote = !self.cfg.connection.is_local();
@@ -921,6 +981,7 @@ impl App {
                         extra_args: cfg.server_extra_args.clone(),
                         lan_tunnel: cfg.lan_host,
                         options: options::to_args(&cfg.server_options, known.as_deref()),
+                        profile: cfg.profile.clone(),
                     };
                     let h = server::start(&prepared, &settings, s_sink)?;
                     App::emit(&tx, &ctx, Event::ServerUp(h.clone()));
@@ -1151,7 +1212,9 @@ impl App {
                 stage("Preparing Python…");
                 let prepared = runtime::ensure(&dir, &l_sink)?;
                 stage(&format!("Connecting to {}…", e.name));
-                let r = relay::JoinRelay::start(host, ports, &prepared.python, &dir, 7200, s_sink)?;
+                // the host's server profile: its tunnel refuses another one (older hosts don't say: "default")
+                let profile = e.profile.clone().unwrap_or_else(|| roe_core::profiles::DEFAULT.into());
+                let r = relay::JoinRelay::start(host, ports, &profile, &prepared.python, &dir, 7200, s_sink)?;
                 // the bridge is ready once it holds the game's UDP port
                 let t = Instant::now();
                 while !roe_core::util::bound_udp(18001) {
@@ -1194,6 +1257,7 @@ impl App {
             return;
         }
         let (name, instance, hosting) = (b.lan_name.clone(), b.instance.clone(), b.hosting.clone());
+        let profile = b.server_profile.clone();
         let server_dir = self.cfg.server_dir_or_default();
         let info = Arc::new(move || {
             if !server::ports().all_up() {
@@ -1209,6 +1273,7 @@ impl App {
                 version: Some(format!("roe-launcher {}", env!("CARGO_PKG_VERSION"))),
                 mode: Some("Training".into()),
                 relay: hosting.load(Ordering::Relaxed).then_some(relay::HostRelay::PORTS),
+                profile: profile.lock().ok().map(|p| p.clone()).filter(|p| !p.is_empty()),
                 ..Default::default()
             })
         });

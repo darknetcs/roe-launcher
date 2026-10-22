@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
     update::write_info(&dir, &info)?;
 
     println!("5) server command");
-    let s = server::Settings { dir: dir.clone(), game_dir: "/game/Ring of Elysium".into(), duration: 1500, extra_args: String::new(), lan_tunnel: false, options: roe_core::options::to_args(&roe_core::options::launcher_defaults(), None) };
+    let s = server::Settings { dir: dir.clone(), game_dir: "/game/Ring of Elysium".into(), duration: 1500, extra_args: String::new(), lan_tunnel: false, options: roe_core::options::to_args(&roe_core::options::launcher_defaults(), None), profile: "default".into() };
     let cmd = server::build_command(&prepared, &s);
     println!("   {} {}", cmd.get_program().to_string_lossy(), cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect::<Vec<_>>().join(" "));
     println!("OK");

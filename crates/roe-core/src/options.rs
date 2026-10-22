@@ -49,7 +49,8 @@ runpy.run_path(script, run_name="__main__")
 
 /// Options the launcher sets itself, or that cannot work with how it starts the server: never shown.
 /// `--debug-console` belongs to the game client and windows_launch.py refuses it with `--services-only`.
-pub const MANAGED: [&str; 9] = ["--client", "--dotnet", "--key-file", "--verify-only", "--remote-peer", "--lan-tunnel", "--services-only", "--duration", "--debug-console"];
+pub const MANAGED: [&str; 10] =
+    ["--client", "--dotnet", "--key-file", "--verify-only", "--remote-peer", "--lan-tunnel", "--services-only", "--duration", "--debug-console", "--profile"];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ServerOption {

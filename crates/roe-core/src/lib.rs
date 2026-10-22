@@ -11,6 +11,7 @@ pub mod maps;
 pub mod options;
 pub mod playername;
 pub mod process;
+pub mod profiles;
 pub mod relay;
 pub mod proton;
 pub mod runtime;

@@ -147,7 +147,8 @@ pub struct JoinRelay {
 impl JoinRelay {
     /// `host` = the host's IP, `ports` = its announced [game, tunnel] ports. `python`/`server_dir` run upstream's
     /// `tools/lan_tunnel_2022.py client`; `duration` is its time limit in seconds.
-    pub fn start(host: IpAddr, ports: [u16; 2], python: &Path, server_dir: &Path, duration: u32, sink: Sink) -> Result<JoinRelay> {
+    /// `profile`: the host's server profile (its announcement says which); the server's tunnel refuses another one.
+    pub fn start(host: IpAddr, ports: [u16; 2], profile: &str, python: &Path, server_dir: &Path, duration: u32, sink: Sink) -> Result<JoinRelay> {
         let bridge_script = server_dir.join("tools/lan_tunnel_2022.py");
         if !bridge_script.is_file() {
             bail!("the server files have no tools/lan_tunnel_2022.py (update the server on the Updates page)");
@@ -155,7 +156,7 @@ impl JoinRelay {
         let game = Forwarder::start(loopback(GAME_PORT), SocketAddr::new(host, ports[0]), loopback_only)?;
         let tunnel = Forwarder::start(loopback(TUNNEL_PORT), SocketAddr::new(host, ports[1]), loopback_only)?;
         let mut c = Command::new(python);
-        c.args(["-B", "-u"]).arg(&bridge_script).args(["client", "--profile", "default", "--duration"]);
+        c.args(["-B", "-u"]).arg(&bridge_script).args(["client", "--profile", profile, "--duration"]);
         c.arg(duration.to_string()).current_dir(server_dir);
         let bridge = process::spawn_logged(c, sink).context("starting the match-traffic bridge")?;
         Ok(JoinRelay { _game: game, _tunnel: tunnel, bridge: Some(bridge) })

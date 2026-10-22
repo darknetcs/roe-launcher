@@ -360,7 +360,10 @@ impl App {
     }
 
     fn player_name_card(&mut self, ui: &mut Ui, pal: &Palette) {
-        ui.label(RichText::new("Player name").strong());
+        ui.label(RichText::new("Player").strong());
+        self.profile_picker(ui, pal);
+        ui.add_space(6.0);
+        ui.label("Player name");
         ui.add(
             egui::TextEdit::singleline(&mut self.cfg.player_name)
                 .char_limit(roe_core::playername::MAX_LEN)
@@ -378,6 +381,67 @@ impl App {
                  BRING_BACK_ROE!!, the original server's name. Takes effect the next time the server starts.",
             ),
         }
+    }
+
+    /// Server profiles (`roe_core::profiles`): each keeps its own character, appearance and player name.
+    fn profile_picker(&mut self, ui: &mut Ui, pal: &Palette) {
+        use roe_core::profiles;
+        let all = profiles::list(&self.cfg.server_dir_or_default(), &self.cfg.profiles);
+        let mut pick = None;
+        ui.horizontal(|ui| {
+            ui.label("Profile");
+            egui::ComboBox::from_id_salt("profile").selected_text(&self.cfg.profile).width(180.0).show_ui(ui, |ui| {
+                for p in &all {
+                    if ui.selectable_label(*p == self.cfg.profile, p).clicked() {
+                        pick = Some(p.clone());
+                    }
+                }
+            });
+            if self.cfg.profile != profiles::DEFAULT
+                && ui.add_enabled(!self.server_running(), egui::Button::new("Delete…")).on_disabled_hover_text("Stop the server first").clicked()
+            {
+                self.profile_delete = Some(self.cfg.profile.clone());
+            }
+        });
+        if let Some(p) = pick {
+            self.switch_profile(&p);
+            self.profile_error = None;
+        }
+        ui.horizontal(|ui| {
+            let r = ui.add(egui::TextEdit::singleline(&mut self.profile_input).desired_width(180.0).hint_text("new profile, e.g. wojtek"));
+            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if (ui.button("Add profile").clicked() || enter) && !self.profile_input.trim().is_empty() {
+                let name = std::mem::take(&mut self.profile_input);
+                self.profile_error = self.create_profile(&name).err();
+                if self.profile_error.is_some() {
+                    self.profile_input = name;
+                }
+            }
+        });
+        if let Some(e) = &self.profile_error {
+            ui.colored_label(pal.bad, e);
+        }
+        if let Some(name) = self.profile_delete.clone() {
+            ui.horizontal(|ui| {
+                ui.colored_label(pal.warn, format!("Delete the profile {name} and its saved character and appearance?"));
+                if ui.button("Delete").clicked() {
+                    self.profile_error = self.delete_profile(&name).err();
+                    self.profile_delete = None;
+                }
+                if ui.button("Keep").clicked() {
+                    self.profile_delete = None;
+                }
+            });
+        }
+        let running = if self.server_running() { " The running server keeps its profile until it restarts." } else { "" };
+        muted(
+            ui,
+            pal,
+            format!(
+                "Each profile has its own character and appearance, kept by the server, and its own player name: handy when \
+                 several people play on this computer. Takes effect the next time the server starts.{running}"
+            ),
+        );
     }
 
     /// Map selector (see `roe_core::maps`), ordered from working to most broken. Supported and experimental maps can

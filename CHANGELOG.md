@@ -5,6 +5,11 @@ All notable changes to roe-launcher. Full release notes and downloads:
 
 ## Unreleased
 
+* **Profiles** (Server Settings → Player): several people on one computer can each keep their own character,
+  appearance and player name. Add a profile, pick it, and the server starts with it (the community server's own
+  `--profile`). Deleting one also deletes its saved appearance. When hosting for your network, joining players use
+  the host's profile automatically (the server requires the same one on both sides).
+
 * **Linux: no more "No module named pip".** If the launcher first ran before `python3-venv` was installed (Debian,
   Ubuntu, Zorin, Mint …), it was left with a half-made Python environment and failed on every start, even after
   installing the package. It now removes that environment and makes it again, and if `python3-venv` is missing
