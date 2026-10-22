@@ -204,6 +204,56 @@ fn ensure_portable(dir: &Path, sink: &Sink) -> Result<Prepared> {
     Ok(Prepared { python, dotnet, dotnet_root: Some(dotnet_home) })
 }
 
+/// The venv's Python can run pip.
+fn has_pip(python: &Path) -> bool {
+    Command::new(python)
+        .args(["-m", "pip", "--version"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+const VENV_HELP: &str = "on Debian, Ubuntu, Zorin or Mint: sudo apt install python3-venv";
+
+/// Makes sure the venv exists and has pip.
+///
+/// On Debian-based systems (Ubuntu, Zorin, Mint …) `python -m venv` without the python3-venv package fails half way
+/// and leaves a venv with Python but no pip; installing the package later doesn't repair it. So: a venv without
+/// pip is removed and made again; and when that still gives no pip (the package is missing), the venv is made
+/// without pip and pip is installed with PyPA's get-pip.py, so the setup goes on without python3-venv.
+fn prepare_venv(sys_python: &Path, venv: &Path, python: &Path, sink: &Sink) -> Result<()> {
+    if python.is_file() && has_pip(python) {
+        return Ok(());
+    }
+    if venv.exists() {
+        sink("The Python environment has no pip (made before python3-venv was installed?): making it again…".into());
+        fs::remove_dir_all(venv).with_context(|| format!("removing the broken Python environment {}", venv.display()))?;
+    } else {
+        sink("Creating the Python environment…".into());
+    }
+    let normal = run_logged(Command::new(sys_python).args(["-m", "venv"]).arg(venv), sink);
+    if normal.is_ok() && has_pip(python) {
+        return Ok(());
+    }
+    // python3-venv is missing: the attempt above left a venv without pip; start clean and bring pip ourselves
+    sink(format!("python3-venv isn't installed, so Python can't set up pip by itself. Setting it up with get-pip.py from {GET_PIP_URL}…"));
+    let _ = fs::remove_dir_all(venv);
+    run_logged(Command::new(sys_python).args(["-m", "venv", "--without-pip"]).arg(venv), sink)
+        .with_context(|| format!("creating the Python environment ({VENV_HELP})"))?;
+    let script = venv.join("get-pip.py");
+    download(GET_PIP_URL, &script).with_context(|| format!("downloading get-pip.py (or install python3-venv: {VENV_HELP})"))?;
+    let installed = run_logged(Command::new(python).arg(&script).args(["--disable-pip-version-check", "--no-warn-script-location"]), sink);
+    let _ = fs::remove_file(&script);
+    if installed.is_err() || !has_pip(python) {
+        let _ = fs::remove_dir_all(venv);
+        bail!("could not set up pip for the Python environment. Install python3-venv ({VENV_HELP}), then try again");
+    }
+    sink("pip is set up.".into());
+    Ok(())
+}
+
 /// Linux: system Python 3.11+ with a venv, and a system or `.tools` .NET 8 SDK.
 fn ensure_venv(dir: &Path, sink: &Sink) -> Result<Prepared> {
     let tools = dir.join(".tools");
@@ -212,11 +262,7 @@ fn ensure_venv(dir: &Path, sink: &Sink) -> Result<Prepared> {
     let sys_python = find_python().ok_or_else(|| anyhow!("Python 3.11 or newer is required (install python3 and python3-venv)"))?;
     let venv = tools.join("venv");
     let python = server_python(dir);
-    if !python.is_file() {
-        sink("Creating the Python environment…".into());
-        run_logged(Command::new(&sys_python).args(["-m", "venv"]).arg(&venv), sink)
-            .context("creating the venv (on Debian/Ubuntu install the python3-venv package)")?;
-    }
+    prepare_venv(&sys_python, &venv, &python, sink)?;
     let req = dir.join("requirements.txt");
     let want = sha256_hex(&req)?;
     let marker = venv.join("roe-dependencies.sha256");
@@ -251,6 +297,52 @@ fn ensure_venv(dir: &Path, sink: &Sink) -> Result<Prepared> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// Without python3-venv (simulated: a Python that can't make pip, see the container check in the notes) the venv
+    /// still gets pip, from get-pip.py. Needs the internet: `cargo test -p roe-core -- --ignored live_get_pip`.
+    #[test]
+    #[ignore]
+    #[cfg(unix)]
+    fn live_get_pip_sets_up_pip_without_ensurepip() {
+        let sys = find_python().expect("python3");
+        let tmp = tempfile::tempdir().unwrap();
+        let venv = tmp.path().join("venv");
+        let python = venv.join("bin/python");
+        Command::new(&sys).args(["-m", "venv", "--without-pip"]).arg(&venv).status().unwrap();
+        download(GET_PIP_URL, &tmp.path().join("get-pip.py")).unwrap();
+        let st = Command::new(&python).arg(tmp.path().join("get-pip.py")).args(["-q", "--disable-pip-version-check"]).status().unwrap();
+        assert!(st.success() && has_pip(&python));
+    }
+
+    /// A venv made without pip (what Debian leaves when python3-venv is missing) is made again, with pip.
+    #[test]
+    #[cfg(unix)]
+    fn a_venv_without_pip_is_made_again() {
+        let Some(sys) = find_python() else { return };
+        let tmp = tempfile::tempdir().unwrap();
+        let venv = tmp.path().join("venv");
+        let ok = Command::new(&sys).args(["-m", "venv", "--without-pip"]).arg(&venv).status().map(|s| s.success()).unwrap_or(false);
+        let python = venv.join("bin/python");
+        if !ok || !python.is_file() {
+            return; // this system's Python can't make venvs at all: nothing to test here
+        }
+        assert!(!has_pip(&python));
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let l = log.clone();
+        let sink: Sink = std::sync::Arc::new(move |m: String| l.lock().unwrap().push(m));
+        let result = prepare_venv(&sys, &venv, &python, &sink);
+        // ROE_EXPECT_PIP=1 (e.g. in a container without python3-venv but with internet): only success counts
+        if std::env::var_os("ROE_EXPECT_PIP").is_some() {
+            assert!(result.is_ok() && has_pip(&python), "{result:?} {:?}", log.lock().unwrap());
+            println!("pip set up; log: {:?}", log.lock().unwrap());
+        }
+        match result {
+            Ok(()) => assert!(has_pip(&python)),
+            // a system without ensurepip (python3-venv missing) must get the clear message instead
+            Err(e) => assert!(format!("{e:#}").contains("python3-venv"), "{e:#}"),
+        }
+        assert!(log.lock().unwrap().iter().any(|m| m.contains("has no pip")));
+    }
 
     fn make_zip(path: &Path, entries: &[(&str, &[u8])]) {
         let mut w = zip::ZipWriter::new(fs::File::create(path).unwrap());

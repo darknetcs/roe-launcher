@@ -37,6 +37,7 @@ pub enum Page {
 pub const DISCORD_APP_ID: &str = "1561730386373902366";
 pub const DISCORD_INVITE: &str = "https://discord.gg/p9vHf4T2D";
 pub const GITHUB_URL: &str = "https://github.com/darknetcs/roe-launcher";
+pub const ISSUES_URL: &str = "https://github.com/darknetcs/roe-launcher/issues";
 
 pub fn discord_app_id() -> Option<String> {
     std::env::var("ROE_DISCORD_APP_ID").ok().filter(|s| !s.trim().is_empty()).or_else(|| (!DISCORD_APP_ID.is_empty()).then(|| DISCORD_APP_ID.to_string()))
@@ -61,6 +62,10 @@ pub enum Pick {
 
 pub enum Event {
     Log(Src, String),
+    /// A line a background sink wrote to launcher.log already: only for the Logs page.
+    Logged(Src, String),
+    /// The game ended; the watcher (`watch_game`) logged it and stopped our server if wanted.
+    GameClosed,
     Stage(Option<String>),
     Remote(Result<Remote, String>),
     Updated(Result<Option<translate::Report>, String>),
@@ -70,6 +75,10 @@ pub enum Event {
     JoinUp(relay::JoinRelay, String),
     FlowDone(Result<(), String>),
     Build(PathBuf, Result<Build, String>),
+    /// The shipped game files found in that folder (game::check_files).
+    Files(PathBuf, game::FileCheck),
+    /// Whether Tencent's crash reporter in that folder is blocked (roe_core::telemetry).
+    Reporter(PathBuf, roe_core::telemetry::State),
     Picked(Pick, Option<PathBuf>),
     /// Servers found by the network sources (LAN, directory), and one message per failed source.
     Servers(Vec<ServerEntry>, Vec<String>),
@@ -110,6 +119,8 @@ pub struct Browser {
     pub responder_error: Option<String>,
     /// Shared with the responder thread so a rename applies at once.
     lan_name: Arc<Mutex<String>>,
+    /// The profile our server was started with, announced so joining launchers use the same one.
+    server_profile: Arc<Mutex<String>>,
     /// Random per run: lets a search skip this launcher's own answer.
     instance: String,
     /// While hosting for the network (`cfg.lan_host` and our server runs): the relay to the server's loopback ports.
@@ -139,12 +150,18 @@ pub struct App {
     pub detected_game: Option<PathBuf>,
     pub game_input: String,
     pub build: Option<(PathBuf, Result<Build, String>)>,
+    /// Which shipped game files the game folder has (names and sizes), checked with the build.
+    pub files: Option<game::FileCheck>,
+    /// Tencent's crash reporter in the game folder: blocked or not (see `set_reporter_blocked`).
+    pub reporter: Option<roe_core::telemetry::State>,
     build_for: Option<PathBuf>,
 
     // processes
     pub server: Option<Handle>,
     pub client: Option<Handle>,
     pub server_ours: bool,
+    /// Shared with the game watcher (`watch_game`).
+    game_watch: Arc<GameWatch>,
     pub ports: Ports,
     /// Players on the running server (from its lobby log), refreshed with the ports; None = no server.
     pub players: Option<u32>,
@@ -179,7 +196,9 @@ pub struct App {
     pub logs: VecDeque<(Src, String)>,
     pub log_show: [bool; 3],
     /// The same lines, written to `<data dir>/launcher.log` (replaced on every start).
-    log_file: Option<std::io::LineWriter<std::fs::File>>,
+    /// launcher.log, shared with background work (`sink`), so lines reach the file at once, also while the window
+    /// is minimised and doesn't update.
+    log_file: LogFile,
 
     // look & feel
     pub logo: egui::TextureHandle,
@@ -202,7 +221,15 @@ pub struct App {
     pub install_wait: Option<Instant>,
     last_install_check: Instant,
     /// Steam reports the game as not fully installed yet (downloading or updating).
-    steam_installing: bool,
+    pub steam_installing: bool,
+    /// Steam's StateFlags for the game (shown while waiting), if it has a manifest.
+    pub steam_state: Option<u32>,
+    /// Why the last folder choice or Auto-detect found no game, shown under the folder field.
+    pub game_error: Option<String>,
+    /// Profile picker: the "new profile" field, why its last name was refused, a profile waiting for delete confirmation.
+    pub profile_input: String,
+    pub profile_error: Option<String>,
+    pub profile_delete: Option<String>,
     /// `ROE_SCREENSHOT=<file.png>` (development): save the window after start-up, then close.
     screenshot: Option<PathBuf>,
     frames: u64,
@@ -235,10 +262,13 @@ impl App {
             detected_game: None,
             game_input: String::new(),
             build: None,
+            files: None,
+            reporter: None,
             build_for: None,
             server: None,
             client: None,
             server_ours: false,
+            game_watch: Arc::default(),
             ports: Ports::default(),
             players: None,
             last_poll: Instant::now() - Duration::from_secs(5),
@@ -261,7 +291,7 @@ impl App {
             exe: selfupdate::current_exe(),
             logs: VecDeque::new(),
             log_show: [true; 3],
-            log_file: open_log_file(),
+            log_file: Arc::new(Mutex::new(open_log_file())),
             logo: tex(&cc.egui_ctx, "logo", assets::LOGO),
 
             bg: None,
@@ -277,6 +307,11 @@ impl App {
             install_wait: None,
             last_install_check: Instant::now(),
             steam_installing: false,
+            steam_state: None,
+            game_error: None,
+            profile_input: String::new(),
+            profile_error: None,
+            profile_delete: None,
             screenshot: std::env::var_os("ROE_SCREENSHOT").map(PathBuf::from),
             frames: 0,
             browser: Browser { instance: instance_id(), ..Default::default() },
@@ -299,6 +334,7 @@ impl App {
         app.refresh_info();
         app.load_schema();
         app.prune_session_logs();
+        app.remove_update_leftovers();
         if app.cfg.check_updates_on_start {
             app.check_updates();
         }
@@ -324,15 +360,12 @@ impl App {
 
     // ---------- logging / events ----------
     pub fn log(&mut self, src: Src, text: String) {
-        if let Some(f) = self.log_file.as_mut() {
-            use std::io::Write;
-            let tag = match src {
-                Src::Launcher => "launcher",
-                Src::Server => "server",
-                Src::Client => "game",
-            };
-            let _ = writeln!(f, "[{tag}] {text}");
-        }
+        write_log_line(&self.log_file, src, &text);
+        self.show_log(src, text);
+    }
+
+    /// Adds a line to the Logs page only (it's in launcher.log already).
+    fn show_log(&mut self, src: Src, text: String) {
         self.logs.push_back((src, text));
         while self.logs.len() > MAX_LOG {
             self.logs.pop_front();
@@ -340,9 +373,10 @@ impl App {
     }
 
     pub fn sink(&self, src: Src) -> Sink {
-        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        let (tx, ctx, file) = (self.tx.clone(), self.ctx.clone(), self.log_file.clone());
         Arc::new(move |l| {
-            let _ = tx.send(Event::Log(src, l));
+            write_log_line(&file, src, &l);
+            let _ = tx.send(Event::Logged(src, l));
             ctx.request_repaint();
         })
     }
@@ -356,6 +390,9 @@ impl App {
         while let Ok(ev) = self.rx.try_recv() {
             match ev {
                 Event::Log(s, t) => self.log(s, t),
+                Event::Logged(s, t) => self.show_log(s, t),
+                // only wakes the window: tick() still sees running → stopped and closes a LAN join
+                Event::GameClosed => {}
                 Event::Stage(s) => self.stage = s,
                 Event::Remote(r) => {
                     self.checking = false;
@@ -381,6 +418,9 @@ impl App {
                     }
                 }
                 Event::ServerUp(h) => {
+                    if let Ok(mut s) = self.game_watch.server.lock() {
+                        *s = Some(h.clone());
+                    }
                     self.server = Some(h);
                     self.server_ours = true;
                 }
@@ -437,6 +477,20 @@ impl App {
                         self.build = Some((p, r));
                     }
                 }
+                Event::Reporter(p, st) => {
+                    if self.cfg.game_dir.as_ref() == Some(&p) {
+                        self.reporter = Some(st);
+                    }
+                }
+                Event::Files(p, c) => {
+                    if self.cfg.game_dir.as_ref() == Some(&p) {
+                        if !c.complete() {
+                            let shown: Vec<&str> = c.missing.iter().chain(&c.different).take(10).map(String::as_str).collect();
+                            self.log(Src::Launcher, format!("{} of {} game files missing or a different size, e.g.: {}", c.problems(), c.total, shown.join(", ")));
+                        }
+                        self.files = Some(c);
+                    }
+                }
                 Event::Picked(kind, path) => {
                     if let Some(p) = path {
                         self.apply_pick(kind, p);
@@ -469,7 +523,8 @@ impl App {
         self.detected_game = if pretend_no_game() { None } else { steam::find_game(&self.libs) };
         // Steam is still downloading or updating it (its manifest says so, even before the exe exists):
         // the files may be half written, so wait
-        self.steam_installing = !pretend_no_game() && !steam::install_finished(&self.libs);
+        self.steam_state = steam::install_state(&self.libs);
+        self.steam_installing = !pretend_no_game() && !self.chosen_game_ok() && !steam::install_finished(&self.libs);
         if self.steam_installing {
             self.detected_game = None;
             self.install_wait.get_or_insert_with(Instant::now);
@@ -556,13 +611,115 @@ impl App {
     }
 
     pub fn set_game_from_text(&mut self) {
-        match game::resolve_input(&self.game_input) {
-            Some(p) => {
-                self.cfg.game_dir = Some(p.clone());
+        let text = self.game_input.clone();
+        self.use_game_folder(&text);
+    }
+
+    /// The player's own choice (typed or Browse): used even while Steam reports an install, and when it isn't
+    /// a game folder, the reason is shown under the field instead of only in the log.
+    fn use_game_folder(&mut self, input: &str) {
+        match game::find_game(input) {
+            Ok(p) => {
                 self.game_input = p.display().to_string();
+                self.cfg.game_dir = Some(p);
+                self.cfg.game_dir_manual = true;
+                self.game_error = None;
+                self.steam_installing = false;
+                self.install_wait = None;
             }
-            None => self.log(Src::Launcher, format!("Europa_Client.exe not found in: {}", self.game_input)),
+            Err(e) => {
+                self.log(Src::Launcher, e.clone());
+                self.game_error = Some(e);
+            }
         }
+    }
+
+    /// Auto-detect: forget the player's choice and look in the Steam libraries again; say so when nothing is there.
+    pub fn auto_detect_game(&mut self) {
+        self.cfg.game_dir = None;
+        self.cfg.game_dir_manual = false;
+        self.game_error = None;
+        self.detect();
+        if self.cfg.game_dir.is_none() && !self.steam_installing {
+            let e = if self.libs.is_empty() {
+                "Auto-detect found no Steam libraries. Choose the game folder (the one with Europa_Client.exe) with Browse…".to_string()
+            } else {
+                "Auto-detect didn't find Ring of Elysium in your Steam libraries. If it's somewhere else, choose its folder \
+                 (the one with Europa_Client.exe) with Browse…"
+                    .to_string()
+            };
+            self.log(Src::Launcher, e.clone());
+            self.game_error = Some(e);
+        }
+    }
+
+    /// Blocks or allows Tencent's crash reporter in the game folder right away (Game page), and remembers the choice.
+    pub fn set_reporter_blocked(&mut self, block: bool) {
+        self.cfg.block_tencent_reporter = block;
+        let Some(dir) = self.cfg.game_dir.clone() else { return };
+        let (tx, ctx, sink) = (self.tx.clone(), self.ctx.clone(), self.sink(Src::Launcher));
+        std::thread::spawn(move || {
+            match roe_core::telemetry::set_blocked(&dir, block) {
+                Ok(0) => {}
+                Ok(n) => sink(format!("Tencent's crash reporter is {} ({n} file{}).", if block { "blocked" } else { "allowed again" }, if n == 1 { "" } else { "s" })),
+                Err(e) => sink(format!("Could not {} Tencent's crash reporter: {e:#}", if block { "block" } else { "allow" })),
+            }
+            App::emit(&tx, &ctx, Event::Reporter(dir.clone(), roe_core::telemetry::state(&dir)));
+        });
+    }
+
+    /// Switches the server profile; each profile keeps its own player name. Applies when the server next starts.
+    pub fn switch_profile(&mut self, name: &str) {
+        let Ok(new) = roe_core::profiles::validate(name) else { return };
+        if new == self.cfg.profile {
+            return;
+        }
+        let old = std::mem::replace(&mut self.cfg.profile, new.clone());
+        self.cfg.profile_names.insert(old, self.cfg.player_name.clone());
+        // a profile used for the first time starts with its own name as the player name (when that's a valid one)
+        let fallback = || if roe_core::playername::validate(&new).is_ok() { new.clone() } else { roe_core::playername::DEFAULT.into() };
+        self.cfg.player_name = self.cfg.profile_names.get(&new).cloned().unwrap_or_else(fallback);
+        self.log(Src::Launcher, format!("Profile: {new}. It's used from the next server start."));
+    }
+
+    /// Adds a profile made in the launcher and switches to it. Err = why the name isn't allowed.
+    pub fn create_profile(&mut self, name: &str) -> Result<(), String> {
+        let p = roe_core::profiles::validate(name)?;
+        if !self.cfg.profiles.contains(&p) && p != roe_core::profiles::DEFAULT {
+            self.cfg.profiles.push(p.clone());
+        }
+        self.switch_profile(&p);
+        Ok(())
+    }
+
+    /// Deletes a profile and its saved appearance on the server (never "default"; not while the server runs).
+    pub fn delete_profile(&mut self, name: &str) -> Result<(), String> {
+        if name == roe_core::profiles::DEFAULT {
+            return Err("The default profile can't be deleted.".into());
+        }
+        if self.server_running() {
+            return Err("Stop the server first.".into());
+        }
+        let folder = roe_core::profiles::folder(&self.cfg.server_dir_or_default(), name);
+        if folder.exists() {
+            std::fs::remove_dir_all(&folder).map_err(|e| format!("Could not delete {}: {e}", folder.display()))?;
+        }
+        self.cfg.profiles.retain(|p| p != name);
+        self.cfg.profile_names.remove(name);
+        if self.cfg.profile == name {
+            self.switch_profile(roe_core::profiles::DEFAULT);
+            self.cfg.profile_names.remove(name);
+        }
+        self.log(Src::Launcher, format!("Deleted the profile {name} and its saved appearance."));
+        Ok(())
+    }
+
+    /// A game folder Steam's install state doesn't apply to: the player chose it themselves (remembered in the
+    /// settings until Auto-detect), or it lies outside every Steam library, so Steam's manifest describes another
+    /// copy (this also covers folders chosen by hand before the setting existed).
+    fn chosen_game_ok(&self) -> bool {
+        let Some(dir) = self.cfg.game_dir.as_deref().filter(|d| game::is_game_dir(d)) else { return false };
+        self.cfg.game_dir_manual || !self.libs.iter().any(|lib| dir.starts_with(lib))
     }
 
     pub fn resolved_proton(&self) -> Option<Runtime> {
@@ -733,13 +890,7 @@ impl App {
 
     fn apply_pick(&mut self, kind: Pick, p: PathBuf) {
         match kind {
-            Pick::Game => match game::resolve_input(&p.to_string_lossy()) {
-                Some(g) => {
-                    self.game_input = g.display().to_string();
-                    self.cfg.game_dir = Some(g);
-                }
-                None => self.log(Src::Launcher, format!("Europa_Client.exe not found in {}", p.display())),
-            },
+            Pick::Game => self.use_game_folder(&p.to_string_lossy()),
             Pick::Prefix => self.cfg.compat_data = Some(p),
             Pick::ServerDir => {
                 self.cfg.server_dir = Some(p);
@@ -789,6 +940,7 @@ impl App {
         let (sink, tx, ctx) = (self.sink(Src::Launcher), self.tx.clone(), self.ctx.clone());
         std::thread::spawn(move || {
             let res = (|| -> anyhow::Result<Option<translate::Report>> {
+                sink("Updating the server files (Updates page).".into());
                 let remote = update::remote_head()?;
                 update::install(&dir, &remote.sha, &sink)?;
                 translate_step(&dir, do_tr, &sink)
@@ -809,6 +961,11 @@ impl App {
         }
         let cfg = self.cfg.clone();
         let known: Option<Vec<ServerOption>> = self.schema.as_ref().and_then(|s| s.as_ref().ok()).cloned();
+        if let Ok(mut p) = self.browser.server_profile.lock() {
+            if !self.server_running() {
+                *p = roe_core::profiles::validate(&cfg.profile).unwrap_or_else(|_| roe_core::profiles::DEFAULT.into());
+            }
+        }
         // read the ports fresh: the cached status may be up to a second old (or not polled yet)
         self.ports = server::ports();
         let remote = !self.cfg.connection.is_local();
@@ -821,12 +978,15 @@ impl App {
         self.stage = Some("Starting…".into());
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         let (s_sink, c_sink, l_sink) = (self.sink(Src::Server), self.sink(Src::Client), self.sink(Src::Launcher));
+        let watch = self.game_watch.clone();
+        watch.stop_server_on_exit.store(self.cfg.stop_server_on_game_exit, Ordering::SeqCst);
         std::thread::spawn(move || {
             let stage = |s: &str| App::emit(&tx, &ctx, Event::Stage(Some(s.to_string())));
             let res = (|| -> anyhow::Result<()> {
                 let dir = cfg.server_dir_or_default();
                 if !already && !remote {
-                    if !update::is_installed(&dir) {
+                    if let Some(why) = update::missing(&dir) {
+                        l_sink(format!("Server files needed: {why}. Downloading them."));
                         stage("Downloading the server files from GitHub…");
                         let remote = update::remote_head()?;
                         update::install(&dir, &remote.sha, &l_sink)?;
@@ -862,8 +1022,13 @@ impl App {
                         extra_args: cfg.server_extra_args.clone(),
                         lan_tunnel: cfg.lan_host,
                         options: options::to_args(&cfg.server_options, known.as_deref()),
+                        profile: cfg.profile.clone(),
                     };
                     let h = server::start(&prepared, &settings, s_sink)?;
+                    // the watcher must know our server even if the window doesn't update again before the game ends
+                    if let Ok(mut s) = watch.server.lock() {
+                        *s = Some(h.clone());
+                    }
                     App::emit(&tx, &ctx, Event::ServerUp(h.clone()));
                     let t = Instant::now();
                     loop {
@@ -882,6 +1047,7 @@ impl App {
                 if with_client {
                     stage("Starting the game…");
                     let h = start_game(&cfg, &game_dir, proton.as_ref(), &cfg.connection.address(), c_sink)?;
+                    watch_game(h.clone(), watch.clone(), true, l_sink.clone(), tx.clone(), ctx.clone());
                     App::emit(&tx, &ctx, Event::ClientUp(h));
                 }
                 Ok(())
@@ -930,6 +1096,17 @@ impl App {
             Ok(_) => self.ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Err(e) => self.log(Src::Launcher, format!("Could not start the new launcher ({}): {e}", exe.display())),
         }
+    }
+
+    /// Removes server.old / server.new that an earlier update couldn't (see update::remove_leftovers), at start,
+    /// only while no server runs.
+    pub fn remove_update_leftovers(&mut self) {
+        if self.server_running() || server::ports().proxy {
+            return;
+        }
+        let dir = self.cfg.server_dir_or_default();
+        let sink = self.sink(Src::Launcher);
+        std::thread::spawn(move || update::remove_leftovers(&dir).into_iter().for_each(|line| sink(line)));
     }
 
     /// Deletes the oldest session logs (Server Settings > Session), only while no server runs.
@@ -1060,6 +1237,8 @@ impl App {
         self.stage = Some(format!("Connecting to {}…", e.name));
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         let (s_sink, c_sink, l_sink) = (self.sink(Src::Server), self.sink(Src::Client), self.sink(Src::Launcher));
+        let watch = self.game_watch.clone();
+        watch.stop_server_on_exit.store(self.cfg.stop_server_on_game_exit, Ordering::SeqCst);
         std::thread::spawn(move || {
             let stage = |s: &str| App::emit(&tx, &ctx, Event::Stage(Some(s.to_string())));
             let res = (|| -> anyhow::Result<()> {
@@ -1072,7 +1251,8 @@ impl App {
                     );
                 }
                 let dir = cfg.server_dir_or_default();
-                if !update::is_installed(&dir) {
+                if let Some(why) = update::missing(&dir) {
+                    l_sink(format!("Server files needed: {why}. Downloading them."));
                     stage("Downloading the server files from GitHub…");
                     let remote = update::remote_head()?;
                     update::install(&dir, &remote.sha, &l_sink)?;
@@ -1080,7 +1260,9 @@ impl App {
                 stage("Preparing Python…");
                 let prepared = runtime::ensure(&dir, &l_sink)?;
                 stage(&format!("Connecting to {}…", e.name));
-                let r = relay::JoinRelay::start(host, ports, &prepared.python, &dir, 7200, s_sink)?;
+                // the host's server profile: its tunnel refuses another one (older hosts don't say: "default")
+                let profile = e.profile.clone().unwrap_or_else(|| roe_core::profiles::DEFAULT.into());
+                let r = relay::JoinRelay::start(host, ports, &profile, &prepared.python, &dir, 7200, s_sink)?;
                 // the bridge is ready once it holds the game's UDP port
                 let t = Instant::now();
                 while !roe_core::util::bound_udp(18001) {
@@ -1092,6 +1274,7 @@ impl App {
                 App::emit(&tx, &ctx, Event::JoinUp(r, e.name.clone()));
                 stage("Starting the game…");
                 let h = start_game(&cfg, &game_dir, proton.as_ref(), Connection::LOCAL_ADDRESS, c_sink)?;
+                watch_game(h.clone(), watch.clone(), false, l_sink.clone(), tx.clone(), ctx.clone());
                 App::emit(&tx, &ctx, Event::ClientUp(h));
                 Ok(())
             })();
@@ -1123,6 +1306,7 @@ impl App {
             return;
         }
         let (name, instance, hosting) = (b.lan_name.clone(), b.instance.clone(), b.hosting.clone());
+        let profile = b.server_profile.clone();
         let server_dir = self.cfg.server_dir_or_default();
         let info = Arc::new(move || {
             if !server::ports().all_up() {
@@ -1138,6 +1322,7 @@ impl App {
                 version: Some(format!("roe-launcher {}", env!("CARGO_PKG_VERSION"))),
                 mode: Some("Training".into()),
                 relay: hosting.load(Ordering::Relaxed).then_some(relay::HostRelay::PORTS),
+                profile: profile.lock().ok().map(|p| p.clone()).filter(|p| !p.is_empty()),
                 ..Default::default()
             })
         });
@@ -1216,15 +1401,9 @@ impl App {
         ctx.request_repaint_after(Duration::from_millis(if self.cfg.theme.effect == Effect::Off { 500 } else { 33 }));
 
         // game exited -> optionally stop the server we started
+        // (logging it and stopping our server is the watcher's job: see watch_game)
         let running = self.client_running();
-        if self.client_was_running && !running {
-            let code = self.client.as_ref().and_then(|h| h.exit_code());
-            self.log(Src::Launcher, format!("Game closed (exit code {}).", code.map(|c| c.to_string()).unwrap_or_else(|| "?".into())));
-            if self.cfg.stop_server_on_game_exit && self.server_ours && self.server_running() {
-                self.log(Src::Launcher, "Stopping the server (the game was closed).".into());
-                self.stop_server();
-            }
-        }
+        self.game_watch.stop_server_on_exit.store(self.cfg.stop_server_on_game_exit, Ordering::SeqCst);
         // leave a LAN host when its game stops (not before the game has started)
         if self.client_was_running && !running {
             if let Some((_, name)) = self.join.take() {
@@ -1242,7 +1421,8 @@ impl App {
         if watch && self.last_install_check.elapsed() > Duration::from_secs(5) {
             self.last_install_check = Instant::now();
             let libs = steam::libraries(&steam::steam_roots());
-            if !steam::install_finished(&libs) {
+            self.steam_state = steam::install_state(&libs);
+            if !steam::install_finished(&libs) && !self.chosen_game_ok() {
                 if !self.steam_installing {
                     self.log(Src::Launcher, "Steam is installing Ring of Elysium; PLAY appears when it finishes.".into());
                 }
@@ -1263,9 +1443,22 @@ impl App {
         if self.cfg.game_dir != self.build_for {
             self.build_for = self.cfg.game_dir.clone();
             self.build = None;
+            self.files = None;
+            self.reporter = None;
             if let Some(p) = self.cfg.game_dir.clone().filter(|p| game::is_game_dir(p)) {
                 let (tx, c2) = (self.tx.clone(), self.ctx.clone());
+                let block = self.cfg.block_tencent_reporter;
+                let sink = self.sink(Src::Launcher);
                 std::thread::spawn(move || {
+                    // a new game folder follows the setting too
+                    if block {
+                        if let Err(e) = roe_core::telemetry::set_blocked(&p, true) {
+                            sink(format!("Could not block Tencent's crash reporter: {e:#}"));
+                        }
+                    }
+                    App::emit(&tx, &c2, Event::Reporter(p.clone(), roe_core::telemetry::state(&p)));
+                    // names and sizes first (milliseconds), then the exe's hash (a second or two)
+                    App::emit(&tx, &c2, Event::Files(p.clone(), game::check_files(&p)));
                     let r = game::check_build(&p).map_err(|e| e.to_string());
                     App::emit(&tx, &c2, Event::Build(p, r));
                 });
@@ -1325,6 +1518,49 @@ fn translate_step(dir: &Path, enabled: bool, sink: &Sink) -> anyhow::Result<Opti
     update::write_info(dir, &info)?;
     sink(format!("Translated {} files; {} lines of new upstream text are still Russian.", rep.files_changed, rep.untranslated));
     Ok(Some(rep))
+}
+
+type LogFile = Arc<Mutex<Option<std::io::LineWriter<std::fs::File>>>>;
+
+fn write_log_line(file: &LogFile, src: Src, text: &str) {
+    use std::io::Write;
+    let tag = match src {
+        Src::Launcher => "launcher",
+        Src::Server => "server",
+        Src::Client => "game",
+    };
+    if let Some(f) = file.lock().ok().as_mut().and_then(|f| f.as_mut()) {
+        let _ = writeln!(f, "[{tag}] {text}");
+    }
+}
+
+/// What the game watcher needs when the game ends, without waiting for the window (which doesn't update while
+/// minimised, e.g. during a match).
+#[derive(Default)]
+pub struct GameWatch {
+    /// The server the launcher started, stopped when the game closes if the setting says so.
+    server: Mutex<Option<Handle>>,
+    stop_server_on_exit: AtomicBool,
+}
+
+/// Waits for the game to end in the background, logs it and stops our server ("Stop the server when the game
+/// closes"); `stop_ours` is false for a game joined on a LAN host.
+fn watch_game(game: Handle, watch: Arc<GameWatch>, stop_ours: bool, sink: Sink, tx: Sender<Event>, ctx: egui::Context) {
+    std::thread::spawn(move || {
+        while game.is_running() {
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        let code = game.exit_code().map(|c| c.to_string()).unwrap_or_else(|| "?".into());
+        sink(format!("Game closed (exit code {code})."));
+        if stop_ours && watch.stop_server_on_exit.load(Ordering::SeqCst) {
+            let server = watch.server.lock().ok().and_then(|s| s.clone()).filter(|s| s.is_running());
+            if let Some(s) = server {
+                sink("Stopping the server (the game was closed).".into());
+                s.request_stop(Duration::from_secs(10));
+            }
+        }
+        App::emit(&tx, &ctx, Event::GameClosed);
+    });
 }
 
 fn open_log_file() -> Option<std::io::LineWriter<std::fs::File>> {
@@ -1436,6 +1672,14 @@ mod wine_fixes {
 
 /// Starts the game against `addr` (`host:port`) with the user's Proton, prefix and extra settings.
 fn start_game(cfg: &Config, game_dir: &std::path::Path, proton: Option<&Runtime>, addr: &str, sink: Sink) -> anyhow::Result<Handle> {
+    // Steam may have restored the reporter (a verify or an update): block it again before the game can start it
+    if cfg.block_tencent_reporter {
+        match roe_core::telemetry::set_blocked(game_dir, true) {
+            Ok(0) => {}
+            Ok(_) => sink("Blocked Tencent's crash reporter again (Steam had restored it).".into()),
+            Err(e) => sink(format!("Could not block Tencent's crash reporter: {e:#}")),
+        }
+    }
     let script = match proton {
         Some(rt) => rt.script.clone(),
         None if !roe_core::NEEDS_PROTON => PathBuf::new(),

@@ -335,6 +335,16 @@ impl App {
                             ui.ctx().open_url(egui::OpenUrl::new_tab(crate::app::GITHUB_URL));
                         }
                     });
+                    // bottom-up layout: added after the row above, so it sits on top of it
+                    // a deep red, so white text stays readable in every theme
+                    let report = egui::Button::new(RichText::new("Report an Issue").color(Color32::WHITE).strong()).fill(Color32::from_rgb(190, 32, 32));
+                    if ui
+                        .add_sized([ui.available_width(), 30.0], report)
+                        .on_hover_text(format!("Opens the launcher's GitHub issues: {}", crate::app::ISSUES_URL))
+                        .clicked()
+                    {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(crate::app::ISSUES_URL));
+                    }
                 });
             });
     }
@@ -360,7 +370,10 @@ impl App {
     }
 
     fn player_name_card(&mut self, ui: &mut Ui, pal: &Palette) {
-        ui.label(RichText::new("Player name").strong());
+        ui.label(RichText::new("Player").strong());
+        self.profile_picker(ui, pal);
+        ui.add_space(6.0);
+        ui.label("Player name");
         ui.add(
             egui::TextEdit::singleline(&mut self.cfg.player_name)
                 .char_limit(roe_core::playername::MAX_LEN)
@@ -378,6 +391,67 @@ impl App {
                  BRING_BACK_ROE!!, the original server's name. Takes effect the next time the server starts.",
             ),
         }
+    }
+
+    /// Server profiles (`roe_core::profiles`): each keeps its own character, appearance and player name.
+    fn profile_picker(&mut self, ui: &mut Ui, pal: &Palette) {
+        use roe_core::profiles;
+        let all = profiles::list(&self.cfg.server_dir_or_default(), &self.cfg.profiles);
+        let mut pick = None;
+        ui.horizontal(|ui| {
+            ui.label("Profile");
+            egui::ComboBox::from_id_salt("profile").selected_text(&self.cfg.profile).width(180.0).show_ui(ui, |ui| {
+                for p in &all {
+                    if ui.selectable_label(*p == self.cfg.profile, p).clicked() {
+                        pick = Some(p.clone());
+                    }
+                }
+            });
+            if self.cfg.profile != profiles::DEFAULT
+                && ui.add_enabled(!self.server_running(), egui::Button::new("Delete…")).on_disabled_hover_text("Stop the server first").clicked()
+            {
+                self.profile_delete = Some(self.cfg.profile.clone());
+            }
+        });
+        if let Some(p) = pick {
+            self.switch_profile(&p);
+            self.profile_error = None;
+        }
+        ui.horizontal(|ui| {
+            let r = ui.add(egui::TextEdit::singleline(&mut self.profile_input).desired_width(180.0).hint_text("new profile, e.g. wojtek"));
+            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if (ui.button("Add profile").clicked() || enter) && !self.profile_input.trim().is_empty() {
+                let name = std::mem::take(&mut self.profile_input);
+                self.profile_error = self.create_profile(&name).err();
+                if self.profile_error.is_some() {
+                    self.profile_input = name;
+                }
+            }
+        });
+        if let Some(e) = &self.profile_error {
+            ui.colored_label(pal.bad, e);
+        }
+        if let Some(name) = self.profile_delete.clone() {
+            ui.horizontal(|ui| {
+                ui.colored_label(pal.warn, format!("Delete the profile {name} and its saved character and appearance?"));
+                if ui.button("Delete").clicked() {
+                    self.profile_error = self.delete_profile(&name).err();
+                    self.profile_delete = None;
+                }
+                if ui.button("Keep").clicked() {
+                    self.profile_delete = None;
+                }
+            });
+        }
+        let running = if self.server_running() { " The running server keeps its profile until it restarts." } else { "" };
+        muted(
+            ui,
+            pal,
+            format!(
+                "Each profile has its own character and appearance, kept by the server, and its own player name: handy when \
+                 several people play on this computer. Takes effect the next time the server starts.{running}"
+            ),
+        );
     }
 
     /// Map selector (see `roe_core::maps`), ordered from working to most broken. Supported and experimental maps can
@@ -927,10 +1001,12 @@ impl App {
                     self.pick(Pick::Game);
                 }
                 if ui.button("Auto-detect").clicked() {
-                    self.cfg.game_dir = None;
-                    self.detect();
+                    self.auto_detect_game();
                 }
             });
+            if let Some(e) = &self.game_error {
+                ui.colored_label(pal.bad, e);
+            }
             match &self.cfg.game_dir {
                 Some(p) if self.game_ok() => {
                     status_line(ui, pal.good, "Europa_Client.exe found");
@@ -945,9 +1021,14 @@ impl App {
                         Some(Err(e)) => status_line(ui, pal.warn, format!("Could not hash the executable: {e}")),
                         None => status_line(ui, pal.muted, "Checking the executable…"),
                     }
+                    self.game_files_line(ui, pal);
                 }
                 _ => {
-                    status_line(ui, pal.bad, "No game folder selected");
+                    if self.steam_installing {
+                        status_line(ui, pal.warn, "Steam is installing or updating the game");
+                    } else {
+                        status_line(ui, pal.bad, "No game folder selected");
+                    }
                     self.install_with_steam(ui, pal);
                 }
             }
@@ -977,6 +1058,8 @@ impl App {
             });
             ui.label(RichText::new("This folder belongs to the launcher: an update replaces everything in it except your data (.tools, runs, runtime with your saved profiles, reports). Do not point it at a checkout you edit by hand (git checkouts are refused).").size(12.5).color(pal.muted));
         });
+        ui.add_space(10.0);
+        card(ui, pal, op, |ui| self.reporter_card(ui, pal));
         if roe_core::NEEDS_PROTON {
             self.proton_and_prefix_cards(ui, pal);
         }
@@ -1057,17 +1140,75 @@ impl App {
         });
     }
 
+    /// Tencent's crash and telemetry collector (roe_core::telemetry): block it or allow it again.
+    fn reporter_card(&mut self, ui: &mut Ui, pal: &Palette) {
+        use roe_core::telemetry::State;
+        ui.label(RichText::new("Tencent crash reporter").strong());
+        let mut block = self.cfg.block_tencent_reporter;
+        if ui.checkbox(&mut block, "Block Tencent's crash reporter (TQMCenter)").changed() {
+            self.set_reporter_blocked(block);
+        }
+        match self.reporter {
+            Some(State::Blocked) => status_line(ui, pal.good, "Blocked: it can't start"),
+            Some(State::Allowed) if self.cfg.block_tencent_reporter => status_line(ui, pal.warn, "Not blocked yet (see the Logs page)"),
+            Some(State::Allowed) => status_line(ui, pal.muted, "Allowed: the game starts it"),
+            Some(State::Mixed) => status_line(ui, pal.warn, "Partly blocked (one of its two copies)"),
+            Some(State::NotFound) => status_line(ui, pal.muted, "Not in this game folder"),
+            None => {}
+        }
+        muted(
+            ui,
+            pal,
+            "The game starts TQMCenter, Tencent's crash and telemetry collector, which can send crash reports and system \
+             details to Tencent. The game doesn't need it. Blocking changes no game file: it only stops that one program \
+             from starting (Windows: a \"deny run\" permission; Linux: no read permission). Untick to allow it again.",
+        );
+    }
+
+    /// The shipped-files check under the game folder: complete, or what's missing and how to repair it.
+    fn game_files_line(&self, ui: &mut Ui, pal: &Palette) {
+        let Some(c) = &self.files else {
+            status_line(ui, pal.muted, "Checking the game files…");
+            return;
+        };
+        if c.complete() {
+            status_line(ui, pal.good, format!("All game files present ({})", c.total));
+            return;
+        }
+        let example = c.missing.first().or(c.different.first()).cloned().unwrap_or_default();
+        status_line(ui, pal.warn, format!("{} of {} game files missing or damaged, e.g. {example}", c.problems(), c.total));
+        ui.label(
+            RichText::new("Repair them in Steam: Library, Ring of Elysium, Properties, Installed Files, Verify integrity of game files. The full list is on the Logs page.")
+                .size(12.5)
+                .color(pal.muted),
+        );
+    }
+
     /// Shown when no game is found: ask Steam to install it, then wait for the download.
     fn install_with_steam(&mut self, ui: &mut Ui, pal: &Palette) {
-        if self.install_wait.is_some() {
+        if self.install_wait.is_some() || self.steam_installing {
             ui.horizontal(|ui| {
                 ui.spinner();
-                muted(ui, pal, "Waiting for Steam to install Ring of Elysium…");
+                muted(ui, pal, "Waiting for Steam to finish installing or updating Ring of Elysium…");
             });
-        } else if ui.button("Install with Steam").on_hover_text("Opens Steam's install dialog for Ring of Elysium").clicked() {
-            self.request_game_install();
+            let state = self.steam_state.map(|f| format!(" (Steam's install state: {f})")).unwrap_or_default();
+            ui.label(
+                RichText::new(format!(
+                    "PLAY appears when Steam is done{state}. Already have the complete game, in Steam or elsewhere? \
+                     Choose its folder above (Browse…) to use it right away."
+                ))
+                .size(12.5)
+                .color(pal.muted),
+            );
+        } else {
+            ui.horizontal(|ui| {
+                muted(ui, pal, "Don't have the game installed?");
+                if ui.button("Install with Steam").on_hover_text("Opens Steam's install dialog for Ring of Elysium").clicked() {
+                    self.request_game_install();
+                }
+            });
+            ui.label(RichText::new("Needs Ring of Elysium in your Steam library.").size(12.5).color(pal.muted));
         }
-        ui.label(RichText::new("Needs Ring of Elysium in your Steam library.").size(12.5).color(pal.muted));
         self.steam_install_help(ui, pal);
     }
 

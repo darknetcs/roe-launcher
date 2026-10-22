@@ -32,11 +32,21 @@ third-party licences (`THIRD-PARTY-LICENSES.html` in every package) · [Notices]
 ## Quick start
 
 ### Linux
+On **Debian, Ubuntu, Zorin, Mint, Pop!\_OS** and other Debian-based systems, install Python's venv module first
+(Fedora, Arch, openSUSE and SteamOS include it with Python):
+```bash
+sudo apt install python3 python3-venv
+```
+Then:
 ```bash
 tar xf roe-launcher-linux-x86_64.tar.gz
 ./roe-launcher/roe-launcher
 ```
 A `roe-launcher.desktop` file is included if you want a menu entry.
+
+If you started the launcher before installing `python3-venv` and it failed with *"No module named pip"*, just press
+**PLAY** again: the launcher repairs its Python environment by itself (versions after v0.1.11; with v0.1.11 or older,
+delete `~/.local/share/roe-local/server/.tools/venv` first).
 
 ### Windows
 1. Unzip `roe-launcher-windows-x86_64.zip` anywhere you can write to (e.g. `Documents\roe-launcher`).
@@ -61,6 +71,7 @@ The first start downloads what the server needs (a few hundred MB), then startup
 |---|---|
 | **Play** | One button: prepares the server, starts it, waits until its ports are up, then starts the game. When the game closes, the server it started is stopped again. You can also run the server on its own. |
 | **Server Settings** | Every match option the installed server offers, read from the server itself and grouped (Match, Targets & bots, Map & world, Vehicles, Network). New upstream options show up after an update without a launcher release. Includes **practice targets** (up to 10 targets on the map) and live control. Clear error messages when the server refuses a combination. |
+| **Tencent crash reporter** | Game page: optionally **block TQMCenter**, the game's own crash and telemetry collector that can report to Tencent. No game file is changed; untick to allow it again. See [PRIVACY.md](PRIVACY.md). |
 | **Player name** | Your own name in the lobby, on the map selection, in the newspaper and on the stats screen (Server Settings → Player name; up to 16 English letters, digits, spaces and symbols). Everyone starts as **BRING_BACK_ROE!!**, the original server's name, now shown in the match too. Applied each time the server starts, so it survives server updates. Empty restores the server's untouched files (the match then says "LOCAL"). |
 | **Map** *(experimental)* | Server Settings → Map. **Dione** is the community server's map and works in Training. **Kill Zone** can be picked for testing: it loads and plays, but you can't extract (the helicopter appears outside the final zone, too high to reach). **Desert** (you fall through the ground) and **Dione at night** (the game freezes at the start) are shown greyed out. The server only has Dione's spawn points, loot, zones and evacuation, so other maps need server support first. A warning next to PLAY reminds you when an experimental map is selected. |
 | **Server status** | Live indicators for the lobby (TCP 9001), proxy (TCP 8001) and endpoint (UDP 18001), uptime, pid, and the server's own output. A server you started yourself is detected and left alone. |
@@ -77,7 +88,8 @@ The first start downloads what the server needs (a few hundred MB), then startup
 
 **Linux**
 * A desktop with OpenGL (Mesa or a vendor driver), X11 or Wayland.
-* `python3` ≥ 3.11 **with venv** (Debian/Ubuntu: `sudo apt install python3 python3-venv`).
+* `python3` ≥ 3.11 **with venv** (Debian, Ubuntu, Zorin, Mint …: `sudo apt install python3 python3-venv`). Without
+  `python3-venv` the launcher still sets up pip itself, with PyPA's `get-pip.py`.
 * Steam + a Proton runtime (GE-Proton recommended; `GE-Proton11-7` is the tested one).
 * `xdg-desktop-portal` for the file dialogs (present on all mainstream desktops).
 
@@ -85,7 +97,8 @@ The first start downloads what the server needs (a few hundred MB), then startup
 * Windows 10 or 11, 64-bit, with an OpenGL-capable graphics driver (any current GPU driver).
 * Steam with the game installed. Nothing else: Python and .NET are downloaded by the launcher.
 
-**Both:** internet access on the first start (GitHub, PyPI, python.org on Windows, Microsoft's .NET download).
+**Both:** internet access on the first start (GitHub, PyPI, python.org on Windows, Microsoft's .NET download; on Linux
+without `python3-venv` also bootstrap.pypa.io).
 
 ## Where things live
 
@@ -274,6 +287,15 @@ when switched on, the launcher answers only computers on private networks, and o
 launcher forwards TCP 28001 → 8001 and 29001 → 19001 (private addresses only); the player's launcher listens on
 127.0.0.1:8001 and :19001, forwards both to the host and runs upstream's bridge client, so the game connects to
 127.0.0.1:8001 as usual.
+
+## Credits
+
+* **[ROE-LIVE](https://github.com/ROE-LIVE/ring-of-elysium-local)** for the community local server the launcher
+  runs, and its profiles, LAN tunnel and translations.
+* **awpstar** ([MLVP](https://github.com/MLVP)) and the four people working with them on
+  [roe_server_previw](https://github.com/MLVP/roe_server_previw), for sharing their server work (user accounts,
+  lobby, map modes) and their permission to use it in the launcher.
+* Everyone in the community who tested, reported bugs and sent screenshots: they shaped every release.
 
 ## Artwork, font and licence
 

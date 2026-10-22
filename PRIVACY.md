@@ -30,7 +30,7 @@ installs nothing outside the folders above.
 | At start (can be switched off on the Updates page) and on **Check** | `github.com`, `api.github.com` (repository `darknetcs/roe-launcher`) | Is a newer launcher available? | A normal web request; no personal data |
 | **Update now** | `github.com` / `objects.githubusercontent.com` | Download the new launcher and its checksum | as above |
 | First start and server updates | `github.com`, `codeload.github.com` (repository `ROE-LIVE/ring-of-elysium-local`) | Check for and download the community server files | as above |
-| First start (preparing the server) | `www.python.org` (Windows), `bootstrap.pypa.io`, `pypi.org` / `files.pythonhosted.org` | Python and the server's Python packages | as above |
+| First start (preparing the server) | `www.python.org` (Windows), `bootstrap.pypa.io` (Windows; Linux only without `python3-venv`), `pypi.org` / `files.pythonhosted.org` | Python and the server's Python packages | as above |
 | First start (preparing the server) | `dot.net` / `dotnet.microsoft.com` / `aka.ms` and Microsoft's download servers | The .NET 8 SDK the server needs | as above |
 | Only if you set an online server list URL (Server Browser) | the address you entered | Fetch that list | as above |
 | **Discord** / **GitHub** buttons | your web browser opens the page | – | – |
@@ -57,6 +57,14 @@ These services see your IP address and a standard request like any website does.
     (26.x.x.x) join your server (TCP ports 28001 and 29001).
   * **Hosts by address** (addresses you add in the Server Browser) are asked directly with the same small query
     on every refresh.
+
+## The game's own crash reporter
+
+The game itself (not the launcher) starts **TQMCenter**, Tencent's crash and telemetry collector, from the
+`TQM64` folder of the game. It can send crash reports and system details to Tencent (`gamer.qq.com`,
+`pc.bugly.qcloud.com`). The launcher never contacts these addresses. On the **Game** page you can **block it**
+(off by default): the launcher then stops that one program from starting, without changing any game file
+(Windows: a "deny run" permission for your user; Linux: no read permission). Untick it to allow it again.
 
 ## Children
 

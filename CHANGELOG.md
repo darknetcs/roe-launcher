@@ -3,6 +3,48 @@
 All notable changes to roe-launcher. Full release notes and downloads:
 <https://github.com/darknetcs/roe-launcher/releases>.
 
+## Unreleased
+
+* **Report an Issue** button (red, above Discord and GitHub in the sidebar): opens the launcher's GitHub issues.
+
+* **"Stop the server when the game closes" works while the launcher is minimised.** The launcher only did its
+  checks while its window updated, and a minimised window doesn't (on Wayland at least), so the server kept running
+  until you next touched the launcher. A background watcher now notices the end of the game, logs it and stops the
+  server at once. Log lines also reach `launcher.log` at once, instead of when the window next updates.
+
+* **Block Tencent's crash reporter** (Game page, off by default): the game starts TQMCenter, Tencent's crash and
+  telemetry collector, which can send crash reports and system details to Tencent. The launcher can now stop it
+  from starting, without changing any game file (Windows: a "deny run" permission; Linux: no read permission), and
+  blocks it again before each game start if Steam restored it. Idea from MLVP's server project.
+
+* **Profiles** (Server Settings → Player): several people on one computer can each keep their own character,
+  appearance and player name. Add a profile, pick it, and the server starts with it (the community server's own
+  `--profile`). Deleting one also deletes its saved appearance. When hosting for your network, joining players use
+  the host's profile automatically (the server requires the same one on both sides).
+
+* **Linux: no more "No module named pip".** If the launcher first ran before `python3-venv` was installed (Debian,
+  Ubuntu, Zorin, Mint …), it was left with a half-made Python environment and failed on every start, even after
+  installing the package. It now removes that environment and makes it again, and if `python3-venv` is missing
+  it sets up pip itself with PyPA's get-pip.py, so the setup goes on without it. The README's Linux quick start
+  now lists `python3-venv`.
+* **Game files check:** the Game page compares the game folder with the 299 files Steam ships for the supported
+  build (names and sizes, in milliseconds): "All game files present", or how many are missing or damaged, with
+  the full list in the log and how to repair them in Steam. A folder with Europa_Client.exe but most of the game
+  missing (an exe copied on its own) is not accepted as the game folder, and the search looks further.
+* **Server updates explain themselves:** the log says why the server files are downloaded, and leftover
+  `server.old` / `server.new` folders from an interrupted update are cleaned up at the next start.
+* **Game folder fixes** (reported by a player on Windows):
+  * A game Steam marks as "update required" or "update paused" no longer leaves the launcher stuck on "Waiting for
+    Steam to install Ring of Elysium…". Only Steam actually writing the files counts as installing.
+  * A folder you choose yourself (Browse or typed) is remembered as yours: Steam's install state isn't checked for
+    it any more, also after a restart, until you press Auto-detect. A folder outside your Steam libraries is never
+    held up by Steam either.
+  * When a folder isn't accepted, or Auto-detect finds nothing, the reason now shows under the field instead of
+    only on the Logs page.
+  * Choosing a parent folder or a renamed copy works: the launcher looks up to three folders deeper for
+    Europa_Client.exe (never the DX12 copy in XVersion; choosing XVersion picks the game folder above it).
+  * "Install with Steam" now sits under "Don't have the game installed?", so it no longer reads as an instruction.
+
 ## v0.1.11 — 2026-10-21
 
 * **LAN play over Hamachi and Radmin VPN:** hosts accept players with Hamachi (25.x.x.x) and Radmin VPN (26.x.x.x)
