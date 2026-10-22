@@ -72,6 +72,8 @@ pub enum Event {
     Build(PathBuf, Result<Build, String>),
     /// The shipped game files found in that folder (game::check_files).
     Files(PathBuf, game::FileCheck),
+    /// Whether Tencent's crash reporter in that folder is blocked (roe_core::telemetry).
+    Reporter(PathBuf, roe_core::telemetry::State),
     Picked(Pick, Option<PathBuf>),
     /// Servers found by the network sources (LAN, directory), and one message per failed source.
     Servers(Vec<ServerEntry>, Vec<String>),
@@ -145,6 +147,8 @@ pub struct App {
     pub build: Option<(PathBuf, Result<Build, String>)>,
     /// Which shipped game files the game folder has (names and sizes), checked with the build.
     pub files: Option<game::FileCheck>,
+    /// Tencent's crash reporter in the game folder: blocked or not (see `set_reporter_blocked`).
+    pub reporter: Option<roe_core::telemetry::State>,
     build_for: Option<PathBuf>,
 
     // processes
@@ -250,6 +254,7 @@ impl App {
             game_input: String::new(),
             build: None,
             files: None,
+            reporter: None,
             build_for: None,
             server: None,
             client: None,
@@ -458,6 +463,11 @@ impl App {
                         self.build = Some((p, r));
                     }
                 }
+                Event::Reporter(p, st) => {
+                    if self.cfg.game_dir.as_ref() == Some(&p) {
+                        self.reporter = Some(st);
+                    }
+                }
                 Event::Files(p, c) => {
                     if self.cfg.game_dir.as_ref() == Some(&p) {
                         if !c.complete() {
@@ -627,6 +637,21 @@ impl App {
             self.log(Src::Launcher, e.clone());
             self.game_error = Some(e);
         }
+    }
+
+    /// Blocks or allows Tencent's crash reporter in the game folder right away (Game page), and remembers the choice.
+    pub fn set_reporter_blocked(&mut self, block: bool) {
+        self.cfg.block_tencent_reporter = block;
+        let Some(dir) = self.cfg.game_dir.clone() else { return };
+        let (tx, ctx, sink) = (self.tx.clone(), self.ctx.clone(), self.sink(Src::Launcher));
+        std::thread::spawn(move || {
+            match roe_core::telemetry::set_blocked(&dir, block) {
+                Ok(0) => {}
+                Ok(n) => sink(format!("Tencent's crash reporter is {} ({n} file{}).", if block { "blocked" } else { "allowed again" }, if n == 1 { "" } else { "s" })),
+                Err(e) => sink(format!("Could not {} Tencent's crash reporter: {e:#}", if block { "block" } else { "allow" })),
+            }
+            App::emit(&tx, &ctx, Event::Reporter(dir.clone(), roe_core::telemetry::state(&dir)));
+        });
     }
 
     /// Switches the server profile; each profile keeps its own player name. Applies when the server next starts.
@@ -1401,9 +1426,19 @@ impl App {
             self.build_for = self.cfg.game_dir.clone();
             self.build = None;
             self.files = None;
+            self.reporter = None;
             if let Some(p) = self.cfg.game_dir.clone().filter(|p| game::is_game_dir(p)) {
                 let (tx, c2) = (self.tx.clone(), self.ctx.clone());
+                let block = self.cfg.block_tencent_reporter;
+                let sink = self.sink(Src::Launcher);
                 std::thread::spawn(move || {
+                    // a new game folder follows the setting too
+                    if block {
+                        if let Err(e) = roe_core::telemetry::set_blocked(&p, true) {
+                            sink(format!("Could not block Tencent's crash reporter: {e:#}"));
+                        }
+                    }
+                    App::emit(&tx, &c2, Event::Reporter(p.clone(), roe_core::telemetry::state(&p)));
                     // names and sizes first (milliseconds), then the exe's hash (a second or two)
                     App::emit(&tx, &c2, Event::Files(p.clone(), game::check_files(&p)));
                     let r = game::check_build(&p).map_err(|e| e.to_string());
@@ -1576,6 +1611,14 @@ mod wine_fixes {
 
 /// Starts the game against `addr` (`host:port`) with the user's Proton, prefix and extra settings.
 fn start_game(cfg: &Config, game_dir: &std::path::Path, proton: Option<&Runtime>, addr: &str, sink: Sink) -> anyhow::Result<Handle> {
+    // Steam may have restored the reporter (a verify or an update): block it again before the game can start it
+    if cfg.block_tencent_reporter {
+        match roe_core::telemetry::set_blocked(game_dir, true) {
+            Ok(0) => {}
+            Ok(_) => sink("Blocked Tencent's crash reporter again (Steam had restored it).".into()),
+            Err(e) => sink(format!("Could not block Tencent's crash reporter: {e:#}")),
+        }
+    }
     let script = match proton {
         Some(rt) => rt.script.clone(),
         None if !roe_core::NEEDS_PROTON => PathBuf::new(),

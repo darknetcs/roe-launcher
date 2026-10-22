@@ -5,6 +5,11 @@ All notable changes to roe-launcher. Full release notes and downloads:
 
 ## Unreleased
 
+* **Block Tencent's crash reporter** (Game page, off by default): the game starts TQMCenter, Tencent's crash and
+  telemetry collector, which can send crash reports and system details to Tencent. The launcher can now stop it
+  from starting, without changing any game file (Windows: a "deny run" permission; Linux: no read permission), and
+  blocks it again before each game start if Steam restored it. Idea from MLVP's server project.
+
 * **Profiles** (Server Settings → Player): several people on one computer can each keep their own character,
   appearance and player name. Add a profile, pick it, and the server starts with it (the community server's own
   `--profile`). Deleting one also deletes its saved appearance. When hosting for your network, joining players use

@@ -1048,6 +1048,8 @@ impl App {
             });
             ui.label(RichText::new("This folder belongs to the launcher: an update replaces everything in it except your data (.tools, runs, runtime with your saved profiles, reports). Do not point it at a checkout you edit by hand (git checkouts are refused).").size(12.5).color(pal.muted));
         });
+        ui.add_space(10.0);
+        card(ui, pal, op, |ui| self.reporter_card(ui, pal));
         if roe_core::NEEDS_PROTON {
             self.proton_and_prefix_cards(ui, pal);
         }
@@ -1126,6 +1128,31 @@ impl App {
             });
             ui.label(RichText::new("Automatic = the game's own Steam prefix when there is one, otherwise a private prefix the launcher creates.").size(12.5).color(pal.muted));
         });
+    }
+
+    /// Tencent's crash and telemetry collector (roe_core::telemetry): block it or allow it again.
+    fn reporter_card(&mut self, ui: &mut Ui, pal: &Palette) {
+        use roe_core::telemetry::State;
+        ui.label(RichText::new("Tencent crash reporter").strong());
+        let mut block = self.cfg.block_tencent_reporter;
+        if ui.checkbox(&mut block, "Block Tencent's crash reporter (TQMCenter)").changed() {
+            self.set_reporter_blocked(block);
+        }
+        match self.reporter {
+            Some(State::Blocked) => status_line(ui, pal.good, "Blocked: it can't start"),
+            Some(State::Allowed) if self.cfg.block_tencent_reporter => status_line(ui, pal.warn, "Not blocked yet (see the Logs page)"),
+            Some(State::Allowed) => status_line(ui, pal.muted, "Allowed: the game starts it"),
+            Some(State::Mixed) => status_line(ui, pal.warn, "Partly blocked (one of its two copies)"),
+            Some(State::NotFound) => status_line(ui, pal.muted, "Not in this game folder"),
+            None => {}
+        }
+        muted(
+            ui,
+            pal,
+            "The game starts TQMCenter, Tencent's crash and telemetry collector, which can send crash reports and system \
+             details to Tencent. The game doesn't need it. Blocking changes no game file: it only stops that one program \
+             from starting (Windows: a \"deny run\" permission; Linux: no read permission). Untick to allow it again.",
+        );
     }
 
     /// The shipped-files check under the game folder: complete, or what's missing and how to repair it.

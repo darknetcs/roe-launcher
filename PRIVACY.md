@@ -58,6 +58,14 @@ These services see your IP address and a standard request like any website does.
   * **Hosts by address** (addresses you add in the Server Browser) are asked directly with the same small query
     on every refresh.
 
+## The game's own crash reporter
+
+The game itself (not the launcher) starts **TQMCenter**, Tencent's crash and telemetry collector, from the
+`TQM64` folder of the game. It can send crash reports and system details to Tencent (`gamer.qq.com`,
+`pc.bugly.qcloud.com`). The launcher never contacts these addresses. On the **Game** page you can **block it**
+(off by default): the launcher then stops that one program from starting, without changing any game file
+(Windows: a "deny run" permission for your user; Linux: no read permission). Untick it to allow it again.
+
 ## Children
 
 The launcher collects no personal data from anyone, including children.

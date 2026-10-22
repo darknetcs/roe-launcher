@@ -156,6 +156,8 @@ pub struct Config {
     /// The in-game name (lobby, map selection, newspaper, stats); empty = upstream's names (the match then says
     /// "LOCAL"). New players start with `playername::DEFAULT`. See `playername`.
     pub player_name: String,
+    /// Keep Tencent's crash and telemetry collector in the game folder from starting (see `telemetry`). Off by default.
+    pub block_tencent_reporter: bool,
     /// The server profile (`--profile`, see `profiles`): own character and appearance. "default" = the original.
     pub profile: String,
     /// Profiles made in the launcher (the server lists the ones it has saved itself).
@@ -197,6 +199,7 @@ impl Default for Config {
             lan_name: String::new(),
             discord_presence: false,
             player_name: crate::playername::DEFAULT.into(),
+            block_tencent_reporter: false,
             profile: crate::profiles::DEFAULT.into(),
             profiles: Vec::new(),
             profile_names: Default::default(),
