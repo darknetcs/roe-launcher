@@ -44,6 +44,9 @@ All notable changes to roe-launcher. Full release notes and downloads:
   * Choosing a parent folder or a renamed copy works: the launcher looks up to three folders deeper for
     Europa_Client.exe (never the DX12 copy in XVersion; choosing XVersion picks the game folder above it).
   * "Install with Steam" now sits under "Don't have the game installed?", so it no longer reads as an instruction.
+* **Server Browser:** new **Ping** column (green / yellow / red), and the columns now follow the window width:
+  long names and addresses are cut to fit (hover shows them in full), and in a narrow window the filter switches
+  move to a second line instead of overlapping the buttons.
 
 ## v0.1.11 — 2026-10-21
 

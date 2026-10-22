@@ -23,9 +23,14 @@ fn log_panics() {
 
 fn main() -> eframe::Result {
     log_panics();
+    // `ROE_WINDOW_SIZE=1600x900` (development): start at another size, e.g. to check layouts with ROE_SCREENSHOT
+    let size = std::env::var("ROE_WINDOW_SIZE")
+        .ok()
+        .and_then(|v| v.split_once('x').and_then(|(w, h)| Some([w.trim().parse().ok()?, h.trim().parse().ok()?])))
+        .unwrap_or([1280.0, 720.0]);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 720.0]) // 16:9, like the bundled backgrounds, so they are not cropped
+            .with_inner_size(size) // 16:9 by default, like the bundled backgrounds, so they are not cropped
             .with_min_inner_size([880.0, 580.0])
             .with_title("Ring of Elysium — Local Launcher")
             .with_app_id("roe-launcher")
