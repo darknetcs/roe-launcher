@@ -202,7 +202,14 @@ pub struct App {
     pub install_wait: Option<Instant>,
     last_install_check: Instant,
     /// Steam reports the game as not fully installed yet (downloading or updating).
-    steam_installing: bool,
+    pub steam_installing: bool,
+    /// Steam's StateFlags for the game (shown while waiting), if it has a manifest.
+    pub steam_state: Option<u32>,
+    /// The player chose the game folder themselves (Browse or typed): it wins over Steam's install state, which
+    /// may describe another copy (e.g. a Steam install in another library).
+    game_chosen: bool,
+    /// Why the last folder choice or Auto-detect found no game, shown under the folder field.
+    pub game_error: Option<String>,
     /// `ROE_SCREENSHOT=<file.png>` (development): save the window after start-up, then close.
     screenshot: Option<PathBuf>,
     frames: u64,
@@ -277,6 +284,9 @@ impl App {
             install_wait: None,
             last_install_check: Instant::now(),
             steam_installing: false,
+            steam_state: None,
+            game_chosen: false,
+            game_error: None,
             screenshot: std::env::var_os("ROE_SCREENSHOT").map(PathBuf::from),
             frames: 0,
             browser: Browser { instance: instance_id(), ..Default::default() },
@@ -469,7 +479,8 @@ impl App {
         self.detected_game = if pretend_no_game() { None } else { steam::find_game(&self.libs) };
         // Steam is still downloading or updating it (its manifest says so, even before the exe exists):
         // the files may be half written, so wait
-        self.steam_installing = !pretend_no_game() && !steam::install_finished(&self.libs);
+        self.steam_state = steam::install_state(&self.libs);
+        self.steam_installing = !pretend_no_game() && !self.chosen_game_ok() && !steam::install_finished(&self.libs);
         if self.steam_installing {
             self.detected_game = None;
             self.install_wait.get_or_insert_with(Instant::now);
@@ -556,13 +567,53 @@ impl App {
     }
 
     pub fn set_game_from_text(&mut self) {
-        match game::resolve_input(&self.game_input) {
-            Some(p) => {
-                self.cfg.game_dir = Some(p.clone());
+        let text = self.game_input.clone();
+        self.use_game_folder(&text);
+    }
+
+    /// The player's own choice (typed or Browse): used even while Steam reports an install, and when it isn't
+    /// a game folder, the reason is shown under the field instead of only in the log.
+    fn use_game_folder(&mut self, input: &str) {
+        match game::find_game(input) {
+            Ok(p) => {
                 self.game_input = p.display().to_string();
+                self.cfg.game_dir = Some(p);
+                self.game_chosen = true;
+                self.game_error = None;
+                self.steam_installing = false;
+                self.install_wait = None;
             }
-            None => self.log(Src::Launcher, format!("Europa_Client.exe not found in: {}", self.game_input)),
+            Err(e) => {
+                self.log(Src::Launcher, e.clone());
+                self.game_error = Some(e);
+            }
         }
+    }
+
+    /// Auto-detect: forget the player's choice and look in the Steam libraries again; say so when nothing is there.
+    pub fn auto_detect_game(&mut self) {
+        self.cfg.game_dir = None;
+        self.game_chosen = false;
+        self.game_error = None;
+        self.detect();
+        if self.cfg.game_dir.is_none() && !self.steam_installing {
+            let e = if self.libs.is_empty() {
+                "Auto-detect found no Steam libraries. Choose the game folder (the one with Europa_Client.exe) with Browse…".to_string()
+            } else {
+                "Auto-detect didn't find Ring of Elysium in your Steam libraries. If it's somewhere else, choose its folder \
+                 (the one with Europa_Client.exe) with Browse…"
+                    .to_string()
+            };
+            self.log(Src::Launcher, e.clone());
+            self.game_error = Some(e);
+        }
+    }
+
+    /// A game folder Steam's install state doesn't apply to: the player chose it themselves, or it lies outside
+    /// every Steam library (so Steam's manifest describes another copy).
+    fn chosen_game_ok(&self) -> bool {
+        let Some(dir) = self.cfg.game_dir.as_deref().filter(|d| game::is_game_dir(d)) else { return false };
+        self.game_chosen || !self.libs.iter().any(|lib| dir.starts_with(lib))
     }
 
     pub fn resolved_proton(&self) -> Option<Runtime> {
@@ -733,13 +784,7 @@ impl App {
 
     fn apply_pick(&mut self, kind: Pick, p: PathBuf) {
         match kind {
-            Pick::Game => match game::resolve_input(&p.to_string_lossy()) {
-                Some(g) => {
-                    self.game_input = g.display().to_string();
-                    self.cfg.game_dir = Some(g);
-                }
-                None => self.log(Src::Launcher, format!("Europa_Client.exe not found in {}", p.display())),
-            },
+            Pick::Game => self.use_game_folder(&p.to_string_lossy()),
             Pick::Prefix => self.cfg.compat_data = Some(p),
             Pick::ServerDir => {
                 self.cfg.server_dir = Some(p);
@@ -1242,7 +1287,8 @@ impl App {
         if watch && self.last_install_check.elapsed() > Duration::from_secs(5) {
             self.last_install_check = Instant::now();
             let libs = steam::libraries(&steam::steam_roots());
-            if !steam::install_finished(&libs) {
+            self.steam_state = steam::install_state(&libs);
+            if !steam::install_finished(&libs) && !self.chosen_game_ok() {
                 if !self.steam_installing {
                     self.log(Src::Launcher, "Steam is installing Ring of Elysium; PLAY appears when it finishes.".into());
                 }

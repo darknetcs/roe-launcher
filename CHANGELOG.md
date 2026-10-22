@@ -3,6 +3,18 @@
 All notable changes to roe-launcher. Full release notes and downloads:
 <https://github.com/darknetcs/roe-launcher/releases>.
 
+## Unreleased
+
+* **Game folder fixes** (reported by a player on Windows):
+  * A game Steam marks as "update required" or "update paused" no longer leaves the launcher stuck on "Waiting for
+    Steam to install Ring of Elysium…". Only Steam actually writing the files counts as installing.
+  * A folder you choose yourself, or one outside your Steam libraries, is used even while Steam reports an install.
+  * When a folder isn't accepted, or Auto-detect finds nothing, the reason now shows under the field instead of
+    only on the Logs page.
+  * Choosing a parent folder or a renamed copy works: the launcher looks up to three folders deeper for
+    Europa_Client.exe (never the DX12 copy in XVersion; choosing XVersion picks the game folder above it).
+  * "Install with Steam" now sits under "Don't have the game installed?", so it no longer reads as an instruction.
+
 ## v0.1.11 — 2026-10-21
 
 * **LAN play over Hamachi and Radmin VPN:** hosts accept players with Hamachi (25.x.x.x) and Radmin VPN (26.x.x.x)

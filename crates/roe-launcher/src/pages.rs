@@ -927,10 +927,12 @@ impl App {
                     self.pick(Pick::Game);
                 }
                 if ui.button("Auto-detect").clicked() {
-                    self.cfg.game_dir = None;
-                    self.detect();
+                    self.auto_detect_game();
                 }
             });
+            if let Some(e) = &self.game_error {
+                ui.colored_label(pal.bad, e);
+            }
             match &self.cfg.game_dir {
                 Some(p) if self.game_ok() => {
                     status_line(ui, pal.good, "Europa_Client.exe found");
@@ -947,7 +949,11 @@ impl App {
                     }
                 }
                 _ => {
-                    status_line(ui, pal.bad, "No game folder selected");
+                    if self.steam_installing {
+                        status_line(ui, pal.warn, "Steam is installing or updating the game");
+                    } else {
+                        status_line(ui, pal.bad, "No game folder selected");
+                    }
                     self.install_with_steam(ui, pal);
                 }
             }
@@ -1059,15 +1065,29 @@ impl App {
 
     /// Shown when no game is found: ask Steam to install it, then wait for the download.
     fn install_with_steam(&mut self, ui: &mut Ui, pal: &Palette) {
-        if self.install_wait.is_some() {
+        if self.install_wait.is_some() || self.steam_installing {
             ui.horizontal(|ui| {
                 ui.spinner();
-                muted(ui, pal, "Waiting for Steam to install Ring of Elysium…");
+                muted(ui, pal, "Waiting for Steam to finish installing or updating Ring of Elysium…");
             });
-        } else if ui.button("Install with Steam").on_hover_text("Opens Steam's install dialog for Ring of Elysium").clicked() {
-            self.request_game_install();
+            let state = self.steam_state.map(|f| format!(" (Steam's install state: {f})")).unwrap_or_default();
+            ui.label(
+                RichText::new(format!(
+                    "PLAY appears when Steam is done{state}. Already have the complete game, in Steam or elsewhere? \
+                     Choose its folder above (Browse…) to use it right away."
+                ))
+                .size(12.5)
+                .color(pal.muted),
+            );
+        } else {
+            ui.horizontal(|ui| {
+                muted(ui, pal, "Don't have the game installed?");
+                if ui.button("Install with Steam").on_hover_text("Opens Steam's install dialog for Ring of Elysium").clicked() {
+                    self.request_game_install();
+                }
+            });
+            ui.label(RichText::new("Needs Ring of Elysium in your Steam library.").size(12.5).color(pal.muted));
         }
-        ui.label(RichText::new("Needs Ring of Elysium in your Steam library.").size(12.5).color(pal.muted));
         self.steam_install_help(ui, pal);
     }
 

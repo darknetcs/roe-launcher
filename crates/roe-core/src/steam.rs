@@ -96,9 +96,22 @@ pub fn install_state(libs: &[PathBuf]) -> Option<u32> {
     })
 }
 
+/// StateFlags bits (Steam's EAppState): the files are complete.
+const FULLY_INSTALLED: u32 = 4;
+/// StateFlags bits while Steam writes the game's files: update running, uninstalling, validating, adding files,
+/// preallocating, downloading, staging, committing.
+const WRITING: u32 = 256 | 2048 | 131072 | 262144 | 524288 | 1048576 | 2097152 | 4194304;
+
 /// Steam has finished installing the game (or it was installed without Steam: no manifest).
+/// StateFlags is a set of bits: "update required" (2) or "update paused" (512) next to "fully installed" (4) still
+/// means complete files. That is common for this game, which gets no updates any more, so only a missing
+/// "fully installed" bit or Steam writing files right now counts as unfinished.
 pub fn install_finished(libs: &[PathBuf]) -> bool {
-    install_state(libs).is_none_or(|flags| flags == 4)
+    install_state(libs).is_none_or(flags_finished)
+}
+
+fn flags_finished(flags: u32) -> bool {
+    flags & FULLY_INSTALLED != 0 && flags & WRITING == 0
 }
 
 /// Opens Steam's install dialog for the game (only works when it is in the user's Steam library).
@@ -300,5 +313,17 @@ mod tests {
         assert!(!install_finished(&[lib.clone()]));
         fs::write(lib.join("steamapps/appmanifest_755790.acf"), manifest(4)).unwrap();
         assert!(install_finished(&[lib]));
+    }
+
+    #[test]
+    fn an_update_steam_cant_or_doesnt_run_still_counts_as_installed() {
+        // fully installed + update required / update paused / both: the files are complete
+        for flags in [4, 6, 516, 518] {
+            assert!(flags_finished(flags), "{flags}");
+        }
+        // started but not installed yet, or Steam writing files now
+        for flags in [1026, 2, 0, 4 | 256, 4 | 1048576, 4 | 131072, 4 | 2048] {
+            assert!(!flags_finished(flags), "{flags}");
+        }
     }
 }
