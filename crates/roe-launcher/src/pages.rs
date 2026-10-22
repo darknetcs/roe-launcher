@@ -335,6 +335,16 @@ impl App {
                             ui.ctx().open_url(egui::OpenUrl::new_tab(crate::app::GITHUB_URL));
                         }
                     });
+                    // bottom-up layout: added after the row above, so it sits on top of it
+                    // a deep red, so white text stays readable in every theme
+                    let report = egui::Button::new(RichText::new("Report an Issue").color(Color32::WHITE).strong()).fill(Color32::from_rgb(190, 32, 32));
+                    if ui
+                        .add_sized([ui.available_width(), 30.0], report)
+                        .on_hover_text(format!("Opens the launcher's GitHub issues: {}", crate::app::ISSUES_URL))
+                        .clicked()
+                    {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(crate::app::ISSUES_URL));
+                    }
                 });
             });
     }

@@ -5,6 +5,8 @@ All notable changes to roe-launcher. Full release notes and downloads:
 
 ## Unreleased
 
+* **Report an Issue** button (red, above Discord and GitHub in the sidebar): opens the launcher's GitHub issues.
+
 * **"Stop the server when the game closes" works while the launcher is minimised.** The launcher only did its
   checks while its window updated, and a minimised window doesn't (on Wayland at least), so the server kept running
   until you next touched the launcher. A background watcher now notices the end of the game, logs it and stops the

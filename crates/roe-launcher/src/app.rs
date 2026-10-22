@@ -37,6 +37,7 @@ pub enum Page {
 pub const DISCORD_APP_ID: &str = "1561730386373902366";
 pub const DISCORD_INVITE: &str = "https://discord.gg/p9vHf4T2D";
 pub const GITHUB_URL: &str = "https://github.com/darknetcs/roe-launcher";
+pub const ISSUES_URL: &str = "https://github.com/darknetcs/roe-launcher/issues";
 
 pub fn discord_app_id() -> Option<String> {
     std::env::var("ROE_DISCORD_APP_ID").ok().filter(|s| !s.trim().is_empty()).or_else(|| (!DISCORD_APP_ID.is_empty()).then(|| DISCORD_APP_ID.to_string()))
