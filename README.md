@@ -45,7 +45,7 @@ tar xf roe-launcher-linux-x86_64.tar.gz
 A `roe-launcher.desktop` file is included if you want a menu entry.
 
 If you started the launcher before installing `python3-venv` and it failed with *"No module named pip"*, just press
-**PLAY** again: the launcher repairs its Python environment by itself (versions after v0.1.11; with v0.1.11 or older,
+**PLAY** again: the launcher repairs its Python environment by itself (from v0.1.12; with v0.1.11 or older,
 delete `~/.local/share/roe-local/server/.tools/venv` first).
 
 ### Windows

@@ -47,6 +47,13 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.1.12" date="2026-10-22">
+      <description>
+        <p>Game folder fixes, a repair for "No module named pip" on Linux, the server stopping on time while the
+        launcher is minimised, a game files check, player profiles, an option to block Tencent's crash reporter, a
+        Report an Issue button and a Server Browser ping column.</p>
+      </description>
+    </release>
     <release version="0.1.11" date="2026-10-21">
       <description>
         <p>LAN play over Hamachi and Radmin VPN with hosts by address, updates that also refresh the documents, and
