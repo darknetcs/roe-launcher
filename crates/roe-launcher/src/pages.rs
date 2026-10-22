@@ -310,12 +310,17 @@ impl App {
                     (Page::Appearance, "Appearance".to_string()),
                     (Page::Logs, "Logs".to_string()),
                 ];
+                // a short window: the entries shrink so the block at the bottom (Report an Issue, Discord/GitHub,
+                // status) never covers them; at normal sizes they stay 40 px
+                const BOTTOM_BLOCK: f32 = 150.0;
+                let gap = ui.spacing().item_spacing.y;
+                let entry_h = ((ui.available_height() - BOTTOM_BLOCK) / items.len() as f32 - gap).clamp(28.0, 40.0);
                 for (page, label) in items {
                     let sel = self.page == page;
                     let btn = egui::Button::new(RichText::new(label).size(16.0).color(if sel { pal.accent } else { pal.text }))
                         .fill(if sel { pal.accent.gamma_multiply(0.20) } else { Color32::TRANSPARENT })
                         .stroke(if sel { Stroke::new(1.0_f32, pal.accent.gamma_multiply(0.6)) } else { Stroke::NONE });
-                    if ui.add_sized([ui.available_width(), 40.0], btn).clicked() {
+                    if ui.add_sized([ui.available_width(), entry_h], btn).clicked() {
                         self.page = page;
                     }
                 }
