@@ -52,6 +52,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
+          # a tag with a dash (v0.1.11-test.1) is a test build: a pre-release, never "latest", so launchers never
+          # offer it as an update (they ask GitHub for releases/latest, which skips pre-releases)
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
           files: |
             roe-launcher-linux-x86_64.tar.gz
             roe-launcher-linux-x86_64.tar.gz.sha256
@@ -102,6 +106,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
+          # a tag with a dash (v0.1.11-test.1) is a test build: a pre-release, never "latest", so launchers never
+          # offer it as an update (they ask GitHub for releases/latest, which skips pre-releases)
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
           files: |
             roe-launcher-windows-x86_64.zip
             roe-launcher-windows-x86_64.zip.sha256
