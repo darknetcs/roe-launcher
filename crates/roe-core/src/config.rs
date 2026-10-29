@@ -114,8 +114,12 @@ pub struct Config {
     pub game_dir_manual: bool,
     pub proton: ProtonChoice,
     pub compat_data: Option<PathBuf>,
-    /// Where the launcher keeps its own copy of the server files.
+    /// Which server the launcher installs and runs (`update::Source` id).
+    pub server_source: String,
+    /// Where the launcher keeps its own copy of the ROE-LIVE server files (from before there was a choice).
     pub server_dir: Option<PathBuf>,
+    /// The same for the other sources, by source id.
+    pub server_dirs: BTreeMap<String, PathBuf>,
     pub check_updates_on_start: bool,
     /// Look for a newer launcher on GitHub when it starts.
     pub check_launcher_updates: bool,
@@ -129,8 +133,10 @@ pub struct Config {
     pub server_duration: u32,
     /// Session logs (`<server>/runs/<id>`) to keep; older ones are deleted at start. 0 = keep all.
     pub keep_runs: u32,
-    /// Server Settings: match options, flag -> value ("true" = switch on). Missing = server default.
+    /// Server Settings: ROE-LIVE's match options, flag -> value ("true" = switch on). Missing = server default.
     pub server_options: BTreeMap<String, String>,
+    /// The same for the other sources, by source id (missing = that source's defaults).
+    pub source_options: BTreeMap<String, BTreeMap<String, String>>,
     /// Where the game connects. Always `Local` until other servers can be joined.
     pub connection: Connection,
     /// Server Browser: addresses of favourite servers.
@@ -176,7 +182,9 @@ impl Default for Config {
             game_dir_manual: false,
             proton: ProtonChoice::Latest(Kind::GeProton),
             compat_data: None,
+            server_source: crate::update::DEFAULT.id.into(),
             server_dir: None,
+            server_dirs: BTreeMap::new(),
             check_updates_on_start: true,
             check_launcher_updates: true,
             translate_after_update: true,
@@ -188,6 +196,7 @@ impl Default for Config {
             server_duration: 1500,
             keep_runs: 20,
             server_options: crate::options::launcher_defaults(),
+            source_options: BTreeMap::new(),
             connection: Connection::Local,
             favorite_servers: Vec::new(),
             saved_servers: Vec::new(),
@@ -276,8 +285,43 @@ impl Config {
         Ok(())
     }
 
+    pub fn source(&self) -> crate::update::Source {
+        crate::update::source(&self.server_source)
+    }
+
+    /// The chosen source's folder: the one picked for it, or its own folder in the data folder.
     pub fn server_dir_or_default(&self) -> PathBuf {
-        self.server_dir.clone().unwrap_or_else(|| data_dir().join("server"))
+        let src = self.source();
+        let picked = if src == crate::update::ROE_LIVE { self.server_dir.clone() } else { self.server_dirs.get(src.id).cloned() };
+        picked.unwrap_or_else(|| data_dir().join(src.folder))
+    }
+
+    /// The chosen source's match options.
+    pub fn options(&self) -> BTreeMap<String, String> {
+        let src = self.source();
+        if src == crate::update::ROE_LIVE {
+            return self.server_options.clone();
+        }
+        self.source_options.get(src.id).cloned().unwrap_or_else(|| src.defaults())
+    }
+
+    /// The chosen source's match options, to change them.
+    pub fn options_mut(&mut self) -> &mut BTreeMap<String, String> {
+        let src = self.source();
+        if src == crate::update::ROE_LIVE {
+            return &mut self.server_options;
+        }
+        self.source_options.entry(src.id.into()).or_insert_with(|| src.defaults())
+    }
+
+    /// Picks the chosen source's folder.
+    pub fn set_server_dir(&mut self, dir: PathBuf) {
+        let src = self.source();
+        if src == crate::update::ROE_LIVE {
+            self.server_dir = Some(dir);
+        } else {
+            self.server_dirs.insert(src.id.into(), dir);
+        }
     }
 
     /// Turns the saved choice into a concrete runtime (None when it is not installed).
@@ -414,6 +458,40 @@ mod tests {
         assert_eq!(Config::load_from(tmp.path()).player_name, "darknetcs");
         fs::write(tmp.path().join("launcher.toml"), "player_name = \"\"\n").unwrap();
         assert_eq!(Config::load_from(tmp.path()).player_name, "");
+    }
+
+    #[test]
+    fn each_server_source_has_its_own_folder() {
+        let mut c = Config::default();
+        assert_eq!(c.source(), crate::update::ROE_RIVIVAL, "livegaming2042's server is the default");
+        c.server_source = crate::update::ROE_LIVE.id.into();
+        assert_eq!(c.server_dir_or_default(), data_dir().join("server"));
+        c.set_server_dir("/games/live".into());
+        c.server_source = crate::update::ROE_RIVIVAL.id.into();
+        assert_eq!(c.server_dir_or_default(), data_dir().join("server-roe-rivival"));
+        c.set_server_dir("/games/rivival".into());
+        assert_eq!(c.server_dir_or_default(), PathBuf::from("/games/rivival"));
+        c.server_source = crate::update::ROE_LIVE.id.into();
+        assert_eq!(c.server_dir_or_default(), PathBuf::from("/games/live"));
+        // a source this launcher doesn't know (a newer config) runs the default
+        c.server_source = "someday".into();
+        assert_eq!(c.server_dir_or_default(), PathBuf::from("/games/rivival"));
+    }
+
+    #[test]
+    fn each_server_source_has_its_own_match_options() {
+        let mut c = Config::default();
+        c.server_source = crate::update::ROE_LIVE.id.into();
+        c.options_mut().insert("--practice-targets".into(), "10".into());
+        c.server_source = crate::update::ROE_RIVIVAL.id.into();
+        assert_eq!(c.options(), crate::update::ROE_RIVIVAL.defaults());
+        assert_eq!(c.options().get("--shared-bots").map(String::as_str), Some("20"));
+        c.options_mut().insert("--shared-bots".into(), "48".into());
+        c.server_source = crate::update::ROE_LIVE.id.into();
+        assert_eq!(c.options().get("--practice-targets").map(String::as_str), Some("10"));
+        assert!(!c.options().contains_key("--shared-bots"));
+        c.server_source = crate::update::ROE_RIVIVAL.id.into();
+        assert_eq!(c.options().get("--shared-bots").map(String::as_str), Some("48"));
     }
 
     #[test]

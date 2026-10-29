@@ -4,17 +4,18 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 fn main() -> anyhow::Result<()> {
-    let dir = PathBuf::from(std::env::args().nth(1).expect("usage: headless <server-dir>"));
+    let dir = PathBuf::from(std::env::args().nth(1).expect("usage: headless <server-dir> [source id]"));
+    let src = update::source(&std::env::args().nth(2).unwrap_or_default());
     let sink: Sink = Arc::new(|l| println!("  | {l}"));
 
-    println!("1) GitHub: latest commit");
-    let remote = update::remote_head()?;
+    println!("1) GitHub: latest commit of {}", src.repo);
+    let remote = update::remote_head(&src)?;
     println!("   {} {} ({})", &remote.sha[..10], remote.message, remote.date);
 
     let local = update::read_info(&dir);
     println!("2) installed: {:?}  update available: {}", local.as_ref().map(|i| &i.sha[..10]), update::update_available(local.as_ref(), &remote));
     if update::update_available(local.as_ref(), &remote) || !update::is_installed(&dir) {
-        update::install(&dir, &remote.sha, &sink)?;
+        update::install(&dir, &src, &remote.sha, &sink)?;
     }
 
     println!("3) runtime (python venv + deps + dotnet)");
@@ -31,7 +32,7 @@ fn main() -> anyhow::Result<()> {
     update::write_info(&dir, &info)?;
 
     println!("5) server command");
-    let s = server::Settings { dir: dir.clone(), game_dir: "/game/Ring of Elysium".into(), duration: 1500, extra_args: String::new(), lan_tunnel: false, options: roe_core::options::to_args(&roe_core::options::launcher_defaults(), None), profile: "default".into() };
+    let s = server::Settings { dir: dir.clone(), game_dir: "/game/Ring of Elysium".into(), duration: 1500, extra_args: String::new(), lan_tunnel: false, options: roe_core::options::to_args(&src.defaults(), None), profile: "default".into(), auto_loot_catalog: src.auto_loot_catalog };
     let cmd = server::build_command(&prepared, &s);
     println!("   {} {}", cmd.get_program().to_string_lossy(), cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect::<Vec<_>>().join(" "));
     println!("OK");

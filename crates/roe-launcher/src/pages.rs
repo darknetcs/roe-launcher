@@ -385,6 +385,11 @@ impl App {
                 .desired_width(260.0)
                 .hint_text("BRING_BACK_ROE!!"),
         );
+        let src = self.cfg.source();
+        if !src.names_and_map {
+            muted(ui, pal, format!("{} has its own lobby and keeps the original name: this name doesn't apply to it.", src.name));
+            return;
+        }
         match roe_core::playername::validate(&self.cfg.player_name) {
             Err(e) => {
                 ui.colored_label(pal.bad, format!("{e} The original names are used until it is fixed."));
@@ -465,10 +470,11 @@ impl App {
         use roe_core::maps::{self, Support};
         ui.label(RichText::new("Map").strong());
         ui.add_space(4.0);
-        let current = maps::playable_id(self.cfg.map_id);
+        let all = self.cfg.source().maps;
+        let current = maps::playable_id(all, self.cfg.map_id);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
-            for m in maps::MAPS {
+            for m in all {
                 let pickable = m.selectable();
                 let selected = m.id == Some(current);
                 let (rect, resp) = ui.allocate_exact_size(vec2(190.0, 104.0), if pickable { Sense::click() } else { Sense::hover() });
@@ -505,7 +511,7 @@ impl App {
             }
         });
         ui.add_space(4.0);
-        match maps::by_id(current) {
+        match maps::by_id(all, current) {
             Some(m) if m.support == Support::Experimental => {
                 ui.colored_label(
                     pal.warn,
@@ -667,6 +673,9 @@ impl App {
                         action = Some(Action::StopGame);
                     }
                 });
+                // two community servers: say whose this is
+                ui.label(RichText::new(format!("Server: {}", self.cfg.source().name)).size(12.5).color(pal.muted))
+                    .on_hover_text("Choose the server on the Updates page.");
                 if let Some(s) = &self.stage {
                     ui.horizontal(|ui| {
                         ui.spinner();
@@ -674,8 +683,9 @@ impl App {
                     });
                 }
                 // an experimental map is easy to forget once it's picked on Server Settings
-                let map = roe_core::maps::playable_id(self.cfg.map_id);
-                if let Some(m) = roe_core::maps::by_id(map).filter(|m| m.support == roe_core::maps::Support::Experimental) {
+                let all = self.cfg.source().maps;
+                let map = roe_core::maps::playable_id(all, self.cfg.map_id);
+                if let Some(m) = roe_core::maps::by_id(all, map).filter(|m| m.support == roe_core::maps::Support::Experimental) {
                     ui.colored_label(pal.warn, format!("⚠ Map: {} (experimental: {}). Change it on Server Settings.", m.name, m.badge.to_lowercase()))
                         .on_hover_text(m.note);
                 }
@@ -806,7 +816,17 @@ impl App {
             }
             Some(Ok(_)) => {
                 ui.label(RichText::new("Up to date").size(19.0).strong().color(pal.good));
-                muted(ui, pal, self.info.as_ref().map(|i| format!("commit {}", &i.sha[..i.sha.len().min(8)])).unwrap_or_default());
+                muted(
+                    ui,
+                    pal,
+                    self.info
+                        .as_ref()
+                        .map(|i| match i.sha.strip_prefix("kit-") {
+                            Some(k) => format!("kit {}", &k[..k.len().min(8)]),
+                            None => format!("commit {}", &i.sha[..i.sha.len().min(8)]),
+                        })
+                        .unwrap_or_default(),
+                );
             }
             Some(Err(_)) => {
                 ui.label(RichText::new("Offline").size(19.0).strong().color(pal.warn));
@@ -892,7 +912,7 @@ impl App {
             ui.label(RichText::new("Match options").strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Reset to launcher defaults").on_hover_text("Glider kit, cycle mode ×3, reliable UDP, idle handoff, winter doors and windows, armored target").clicked() {
-                    self.cfg.server_options = options::launcher_defaults();
+                    *self.cfg.options_mut() = self.cfg.source().defaults();
                 }
             });
         });
@@ -929,7 +949,7 @@ impl App {
     }
 
     fn option_row(&mut self, ui: &mut Ui, pal: &Palette, o: &ServerOption) {
-        let values = &mut self.cfg.server_options;
+        let values = self.cfg.options_mut();
         let mut browse = false;
         form_row_w(ui, &options::label_of(&o.flag), 220.0, |ui| {
             if o.switch {
@@ -1245,15 +1265,34 @@ impl App {
     // ---------- Updates ----------
     fn page_updates(&mut self, ui: &mut Ui, pal: &Palette) {
         self.page_title(ui, pal, "Updates");
-        muted(ui, pal, "Updates for the launcher itself, and for its own copy of ROE-LIVE/ring-of-elysium-local.");
+        muted(ui, pal, "Updates for the launcher itself, and for its own copy of the server it runs.");
         ui.add_space(8.0);
         let op = self.cfg.theme.panel_opacity;
         card(ui, pal, op, |ui| self.launcher_update_card(ui, pal));
         ui.add_space(10.0);
         let mut check = false;
         let mut upd = false;
+        let mut switch_to = None;
         card(ui, pal, op, |ui| {
             ui.label(RichText::new("Server files").strong());
+            let src = self.cfg.source();
+            ui.horizontal(|ui| {
+                ui.label("Server");
+                let can = !self.updating && !self.server_running() && !self.busy();
+                ui.add_enabled_ui(can, |ui| {
+                    egui::ComboBox::from_id_salt("server_source").selected_text(src.name).show_ui(ui, |ui| {
+                        for s in update::SOURCES {
+                            if ui.selectable_label(s == src, s.name).clicked() && s != src {
+                                switch_to = Some(s);
+                            }
+                        }
+                    });
+                });
+                ui.hyperlink_to("GitHub", src.url());
+            });
+            muted(ui, pal, src.about);
+            muted(ui, pal, format!("Folder: {}", self.cfg.server_dir_or_default().display()));
+            ui.add_space(4.0);
             egui::Grid::new("upd").num_columns(2).spacing([18.0, 8.0]).show(ui, |ui| {
                 ui.label("Installed");
                 match &self.info {
@@ -1261,7 +1300,7 @@ impl App {
                     None => ui.label("not installed"),
                 };
                 ui.end_row();
-                ui.label("On GitHub");
+                ui.label(if self.cfg.source().kit.is_some() { "Latest kit" } else { "On GitHub" });
                 match &self.remote {
                     Some(Ok(r)) => ui.label(format!("{}  {}", &r.sha[..10], r.date)),
                     Some(Err(e)) => ui.colored_label(pal.warn, short(e, 80)),
@@ -1308,9 +1347,10 @@ impl App {
             if let Some(n) = n {
                 muted(ui, pal, format!("{n} lines of text added upstream since the last translation are still Russian (mostly documentation)."));
             }
-            ui.add_space(4.0);
-            ui.hyperlink_to("Open the repository on GitHub", "https://github.com/ROE-LIVE/ring-of-elysium-local");
         });
+        if let Some(s) = switch_to {
+            self.switch_server_source(s);
+        }
         if check {
             self.check_updates();
         }

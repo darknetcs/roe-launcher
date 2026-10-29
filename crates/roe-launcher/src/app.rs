@@ -3,7 +3,7 @@ use eframe::egui;
 use roe_core::backgrounds;
 use roe_core::config::{Background, Config, Connection, Effect, ProtonChoice};
 use roe_core::game::{self, Build};
-use roe_core::process::Handle;
+use roe_core::process::{self, Handle};
 use roe_core::proton::{self, Runtime};
 use roe_core::server::{self, Ports};
 use roe_core::servers::{self, ServerEntry, ServerSource};
@@ -67,7 +67,8 @@ pub enum Event {
     /// The game ended; the watcher (`watch_game`) logged it and stopped our server if wanted.
     GameClosed,
     Stage(Option<String>),
-    Remote(Result<Remote, String>),
+    /// The latest commit of a source's repository (a check may end after the player chose another source).
+    Remote(&'static str, Result<Remote, String>),
     Updated(Result<Option<translate::Report>, String>),
     ServerUp(Handle),
     ClientUp(Handle),
@@ -320,6 +321,7 @@ impl App {
             uia_blocked: false,
         };
         app.migrate_legacy_background();
+        app.guard_owned_processes();
         // handy for screenshots / development: ROE_START_PAGE=server|game|updates|appearance|logs|browser
         app.page = match std::env::var("ROE_START_PAGE").as_deref() {
             Ok("server") => Page::Server,
@@ -394,8 +396,12 @@ impl App {
                 // only wakes the window: tick() still sees running → stopped and closes a LAN join
                 Event::GameClosed => {}
                 Event::Stage(s) => self.stage = s,
-                Event::Remote(r) => {
+                Event::Remote(repo, r) => {
                     self.checking = false;
+                    if repo != self.cfg.source().repo {
+                        self.check_updates();
+                        return;
+                    }
                     if let Err(e) = &r {
                         self.log(Src::Launcher, format!("Update check failed: {e}"));
                     }
@@ -540,11 +546,13 @@ impl App {
 
     /// What Discord shows for what the launcher is doing now.
     fn activity(&self) -> Activity {
-        let targets = self.cfg.server_options.get("--practice-targets").filter(|n| !n.is_empty());
+        let opts = self.cfg.options();
+        let targets = opts.get("--practice-targets").filter(|n| !n.is_empty()).map(|n| format!("{n} practice targets"))
+            .or_else(|| opts.get("--shared-bots").filter(|n| !n.is_empty() && *n != "0").map(|n| format!("{n} bots")));
         let (details, state, started) = if let Some(h) = self.client.as_ref().filter(|h| h.is_running()) {
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
             let state = match targets {
-                Some(n) => format!("{n} practice targets"),
+                Some(n) => n,
                 None => "On a local server".into(),
             };
             ("Training match".to_string(), state, Some(now.saturating_sub(h.started.elapsed().as_secs())))
@@ -730,6 +738,21 @@ impl App {
         !pretend_no_game() && !self.steam_installing && self.cfg.game_dir.as_deref().map(game::is_game_dir).unwrap_or(false)
     }
 
+    /// Runs `src` from now on: its own folder, installed on the next start or with Update now.
+    pub fn switch_server_source(&mut self, src: update::Source) {
+        if self.busy() || self.updating || self.server_running() {
+            return;
+        }
+        self.cfg.server_source = src.id.into();
+        self.remote = None;
+        self.report = None;
+        self.refresh_info();
+        self.schema = None;
+        self.load_schema();
+        self.log(Src::Launcher, format!("Server: {} ({}), in {}.", src.name, src.repo, self.cfg.server_dir_or_default().display()));
+        self.check_updates();
+    }
+
     pub fn refresh_info(&mut self) {
         self.info = update::read_info(&self.cfg.server_dir_or_default());
     }
@@ -893,7 +916,7 @@ impl App {
             Pick::Game => self.use_game_folder(&p.to_string_lossy()),
             Pick::Prefix => self.cfg.compat_data = Some(p),
             Pick::ServerDir => {
-                self.cfg.server_dir = Some(p);
+                self.cfg.set_server_dir(p);
                 self.refresh_info();
             }
             Pick::Background => match backgrounds::import(&p, &backgrounds::dir()) {
@@ -905,7 +928,7 @@ impl App {
                 Err(e) => self.log(Src::Launcher, format!("Could not add the background: {e:#}")),
             },
             Pick::LootCatalog => {
-                self.cfg.server_options.insert("--loot-catalog".into(), p.display().to_string());
+                self.cfg.options_mut().insert("--loot-catalog".into(), p.display().to_string());
             }
             Pick::ProtonDir => {
                 if proton::runtime_from_dir(&p, false).is_some() {
@@ -923,10 +946,10 @@ impl App {
             return;
         }
         self.checking = true;
-        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        let (tx, ctx, src) = (self.tx.clone(), self.ctx.clone(), self.cfg.source());
         std::thread::spawn(move || {
-            let r = update::remote_head().map_err(|e| format!("{e:#}"));
-            App::emit(&tx, &ctx, Event::Remote(r));
+            let r = update::remote_head(&src).map_err(|e| format!("{e:#}"));
+            App::emit(&tx, &ctx, Event::Remote(src.repo, r));
         });
     }
 
@@ -935,14 +958,14 @@ impl App {
             return;
         }
         self.updating = true;
-        let dir = self.cfg.server_dir_or_default();
+        let (dir, src) = (self.cfg.server_dir_or_default(), self.cfg.source());
         let do_tr = self.cfg.translate_after_update;
         let (sink, tx, ctx) = (self.sink(Src::Launcher), self.tx.clone(), self.ctx.clone());
         std::thread::spawn(move || {
             let res = (|| -> anyhow::Result<Option<translate::Report>> {
-                sink("Updating the server files (Updates page).".into());
-                let remote = update::remote_head()?;
-                update::install(&dir, &remote.sha, &sink)?;
+                sink(format!("Updating the server files of {} (Updates page).", src.name));
+                let remote = update::remote_head(&src)?;
+                update::install(&dir, &src, &remote.sha, &sink)?;
                 translate_step(&dir, do_tr, &sink)
             })();
             App::emit(&tx, &ctx, Event::Updated(res.map_err(|e| format!("{e:#}"))));
@@ -987,9 +1010,9 @@ impl App {
                 if !already && !remote {
                     if let Some(why) = update::missing(&dir) {
                         l_sink(format!("Server files needed: {why}. Downloading them."));
-                        stage("Downloading the server files from GitHub…");
-                        let remote = update::remote_head()?;
-                        update::install(&dir, &remote.sha, &l_sink)?;
+                        stage(&format!("Downloading {}…", cfg.source().name));
+                        let remote = update::remote_head(&cfg.source())?;
+                        update::install(&dir, &cfg.source(), &remote.sha, &l_sink)?;
                     }
                     stage("Preparing Python and .NET…");
                     let prepared = runtime::ensure(&dir, &l_sink)?;
@@ -998,21 +1021,34 @@ impl App {
                         stage("Translating to English…");
                         translate_step(&dir, true, &l_sink)?;
                     }
+                    let src = cfg.source();
+                    let fixed = src.apply_fixes(&dir)?;
+                    if !fixed.is_empty() {
+                        l_sink(format!("Fixed {} so it starts with this Python.", fixed.join(", ")));
+                    }
                     // an unusable name was already flagged on Server Settings: start with the originals
                     let name = playername::validate(&cfg.player_name).unwrap_or_default();
-                    let map = maps::playable_id(cfg.map_id);
-                    if let Some(m) = maps::by_id(map).filter(|m| m.support == maps::Support::Experimental) {
-                        l_sink(format!("Map: {} ({}) — experimental: spawns, loot and zones are still Dione's.", m.name, map));
+                    let map = maps::playable_id(src.maps, cfg.map_id);
+                    if let Some(m) = maps::by_id(src.maps, map).filter(|m| m.support == maps::Support::Experimental) {
+                        l_sink(format!("Map: {} ({}) — experimental: {}", m.name, map, m.note));
                     }
-                    stage("Setting the player name and map…");
-                    match playername::apply(&prepared, &dir, &name, map) {
-                        Ok(a) if a.lobby => l_sink(format!(
-                            "Player name {} — the lobby is rebuilt once on this start.",
-                            if name.is_empty() { "cleared (original names)".to_string() } else { format!("set to \"{name}\"") }
-                        )),
-                        Ok(_) => {}
-                        // never block playing over the name
-                        Err(e) => l_sink(format!("{e:#}. Starting with the name and map as they were.")),
+                    let mut options = options::to_args(&cfg.options(), known.as_deref());
+                    if let Some(flag) = src.map_option {
+                        options.extend([flag.to_string(), map.to_string()]);
+                    }
+                    if !src.names_and_map {
+                        l_sink(format!("{} has its own lobby: the player name chosen in the launcher doesn't apply.", src.name));
+                    } else {
+                        stage("Setting the player name and map…");
+                        match playername::apply(&prepared, &dir, &name, map) {
+                            Ok(a) if a.lobby => l_sink(format!(
+                                "Player name {} — the lobby is rebuilt once on this start.",
+                                if name.is_empty() { "cleared (original names)".to_string() } else { format!("set to \"{name}\"") }
+                            )),
+                            Ok(_) => {}
+                            // never block playing over the name
+                            Err(e) => l_sink(format!("{e:#}. Starting with the name and map as they were.")),
+                        }
                     }
                     stage("Starting the server…");
                     let settings = server::Settings {
@@ -1021,8 +1057,9 @@ impl App {
                         duration: cfg.server_duration,
                         extra_args: cfg.server_extra_args.clone(),
                         lan_tunnel: cfg.lan_host,
-                        options: options::to_args(&cfg.server_options, known.as_deref()),
+                        options,
                         profile: cfg.profile.clone(),
+                        auto_loot_catalog: src.auto_loot_catalog,
                     };
                     let h = server::start(&prepared, &settings, s_sink)?;
                     // the watcher must know our server even if the window doesn't update again before the game ends
@@ -1096,6 +1133,17 @@ impl App {
             Ok(_) => self.ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Err(e) => self.log(Src::Launcher, format!("Could not start the new launcher ({}): {e}", exe.display())),
         }
+    }
+
+    /// The server must not outlive the launcher: stop one an earlier launcher left running (killed or crashed),
+    /// and stop ours if this one is killed (SIGTERM/SIGINT/SIGHUP on Linux; Windows: see process::spawn_owned).
+    fn guard_owned_processes(&mut self) {
+        let left = process::track_owned(roe_core::util::data_dir().join("owned-processes.txt"));
+        if left > 0 {
+            self.log(Src::Launcher, format!("Stopped a server left running by an earlier launcher that was closed abnormally ({left} process group(s))."));
+        }
+        let sink = self.sink(Src::Launcher);
+        process::stop_owned_on_signals(move |sig| sink(format!("Launcher ended by signal {sig}: stopping the server first.")));
     }
 
     /// Removes server.old / server.new that an earlier update couldn't (see update::remove_leftovers), at start,
@@ -1253,9 +1301,9 @@ impl App {
                 let dir = cfg.server_dir_or_default();
                 if let Some(why) = update::missing(&dir) {
                     l_sink(format!("Server files needed: {why}. Downloading them."));
-                    stage("Downloading the server files from GitHub…");
-                    let remote = update::remote_head()?;
-                    update::install(&dir, &remote.sha, &l_sink)?;
+                    stage(&format!("Downloading {}…", cfg.source().name));
+                    let remote = update::remote_head(&cfg.source())?;
+                    update::install(&dir, &cfg.source(), &remote.sha, &l_sink)?;
                 }
                 stage("Preparing Python…");
                 let prepared = runtime::ensure(&dir, &l_sink)?;

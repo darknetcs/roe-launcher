@@ -23,6 +23,8 @@ pub struct Settings {
     pub options: Vec<String>,
     /// Server profile (`profiles`); "default" passes nothing, as before.
     pub profile: String,
+    /// With no `--loot-catalog` chosen, pass the newest bundled one (`Source::auto_loot_catalog`).
+    pub auto_loot_catalog: bool,
 }
 
 /// Newest `config/windows-smoke-*.json` (the name carries a date and changes upstream).
@@ -48,7 +50,7 @@ pub fn build_args(s: &Settings, dotnet: &Path) -> Vec<String> {
     a.push(s.duration.clamp(120, 7200).to_string());
     a.extend(s.options.iter().cloned());
     // no catalog chosen: the newest bundled one, as play.cmd does
-    if !s.options.iter().any(|x| x == "--loot-catalog") {
+    if s.auto_loot_catalog && !s.options.iter().any(|x| x == "--loot-catalog") {
         if let Some(c) = find_loot_catalog(&s.dir) {
             a.extend(["--loot-catalog".into(), c.display().to_string()]);
         }
@@ -114,7 +116,7 @@ pub fn start(p: &Prepared, s: &Settings, sink: Sink) -> Result<Handle> {
     if listening_tcp(PROXY_PORT) {
         bail!("port {PROXY_PORT} is already in use (another server running?)");
     }
-    process::spawn_logged(build_command(p, s), sink)
+    process::spawn_owned(build_command(p, s), sink)
 }
 
 /// The newest session folder (`runs/<date>T<time>-<id>`): the running server's, while one runs.
@@ -263,7 +265,7 @@ mod tests {
         for same in ["--practice-targets", "10", "-h", "-5", r"C:\x\loot.json", "/tmp/a", "-Odd-Name"] {
             assert_eq!(cmd_style_switch(same), same);
         }
-        let s = Settings { dir: "/s".into(), game_dir: "/g".into(), duration: 1500, extra_args: "-PracticeTargets 10 -LiveControl".into(), lan_tunnel: false, options: vec![], profile: "default".into() };
+        let s = Settings { dir: "/s".into(), game_dir: "/g".into(), duration: 1500, extra_args: "-PracticeTargets 10 -LiveControl".into(), lan_tunnel: false, options: vec![], profile: "default".into(), auto_loot_catalog: true };
         assert!(build_args(&s, Path::new("dotnet")).join(" ").ends_with("--practice-targets 10 --live-control"));
     }
 
@@ -282,6 +284,7 @@ mod tests {
             lan_tunnel: true,
             options: crate::options::to_args(&crate::options::launcher_defaults(), None),
             profile: "default".into(),
+            auto_loot_catalog: true,
         };
         let a = build_args(&s, Path::new("/usr/bin/dotnet"));
         let joined = a.join(" ");
@@ -290,6 +293,9 @@ mod tests {
             assert!(joined.contains(part), "{part}");
         }
         assert!(a.iter().any(|x| x.ends_with("windows-smoke-20261101.json")));
+        // a server with its own loot (RoE-Rivival) gets no catalog unless one is picked
+        let own = Settings { auto_loot_catalog: false, ..s.clone() };
+        assert!(!build_args(&own, Path::new("dotnet")).iter().any(|x| x == "--loot-catalog"));
         // a catalog the user picked replaces the automatic one
         let mine = Settings { options: vec!["--loot-catalog".into(), "/my.json".into()], ..s.clone() };
         let a = build_args(&mine, Path::new("dotnet"));

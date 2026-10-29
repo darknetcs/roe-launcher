@@ -3,6 +3,27 @@
 All notable changes to roe-launcher. Full release notes and downloads:
 <https://github.com/darknetcs/roe-launcher/releases>.
 
+## v0.1.13-test.1 — 2026-10-29 (pre-release)
+
+### Two servers
+
+* **RoE-Rivival by livegaming2042 is the new default server.** Bots that fight back, armour, killfeed, vehicles,
+  and Dione, Europa and Vera in every mode. He shares it as a zip on Google Drive: the launcher downloads the kit
+  he posted last (the current one is listed in this repository, `sources/roe-rivival.json`, so a new kit needs no
+  launcher release) and installs it only if its SHA-256 matches.
+* **ROE-LIVE by general_rj45** stays available: Updates → Server. Each server has its own folder, match options
+  and map list; the one in use is named next to PLAY.
+* RoE-Rivival starts with the options of its own launcher (20 bots, room service, no storm, vehicles, random
+  loot); Server Settings → Map passes the map to it. Its own lobby keeps the original player name.
+* Linux: a help text in RoE-Rivival stopped it from starting with Python 3.14; the launcher fixes that line.
+
+### Fixes
+
+* **The server no longer outlives the launcher.** Closing the launcher by a signal (logout, `kill`, a crash of its
+  window) stops the server first; a server left by a launcher that was killed outright is stopped at the next start.
+  Windows: the server ends with the launcher.
+* **The server's Python uses only its own packages**, never ones installed for another Python on the computer.
+
 ## v0.1.12 — 2026-10-22
 
 ### Fixes (reported by players)

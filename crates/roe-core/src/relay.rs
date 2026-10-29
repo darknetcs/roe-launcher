@@ -158,7 +158,7 @@ impl JoinRelay {
         let mut c = Command::new(python);
         c.args(["-B", "-u"]).arg(&bridge_script).args(["client", "--profile", profile, "--duration"]);
         c.arg(duration.to_string()).current_dir(server_dir);
-        let bridge = process::spawn_logged(c, sink).context("starting the match-traffic bridge")?;
+        let bridge = process::spawn_owned(c, sink).context("starting the match-traffic bridge")?;
         Ok(JoinRelay { _game: game, _tunnel: tunnel, bridge: Some(bridge) })
     }
 

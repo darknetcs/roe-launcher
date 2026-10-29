@@ -1,4 +1,4 @@
-//! Keeps the launcher's own copy of ring-of-elysium-local in sync with GitHub.
+//! Keeps the launcher's own copy of the chosen server (`Source`) in sync with GitHub.
 //! Downloads the exact commit as a tarball (no git needed), swaps it in atomically-ish and
 //! keeps the expensive/user data (`.tools/` = Python venv + .NET, `runs/` = logs).
 use crate::Sink;
@@ -10,8 +10,192 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-pub const REPO: &str = "ROE-LIVE/ring-of-elysium-local";
-pub const BRANCH: &str = "main";
+/// A server the launcher can install: laid out like ROE-LIVE's repository (`tools/windows_launch.py`), from GitHub or,
+/// with `kit`, as a zip its author shares (RoE-Rivival: Google Drive links posted on Discord).
+#[derive(Clone, Copy, Debug)]
+pub struct Source {
+    /// Saved in the config.
+    pub id: &'static str,
+    pub name: &'static str,
+    pub repo: &'static str,
+    pub branch: &'static str,
+    /// The default folder under the launcher's data folder (ROE-LIVE keeps "server", from before there was a choice).
+    pub folder: &'static str,
+    /// The launcher's player name and map choice (`playername`) fit this server's files.
+    pub names_and_map: bool,
+    /// Files in the repository that are not unpacked (a zipped copy of the repository itself).
+    pub skip: &'static [&'static str],
+    pub about: &'static str,
+    /// The maps the launcher offers (`maps`).
+    pub maps: &'static [crate::maps::Map],
+    /// The server takes the map as this option (`--map ID`) instead of the launcher's room-reply patch.
+    pub map_option: Option<&'static str>,
+    /// Match options for a new player and for "Reset to defaults" (flag -> value, "true" = switch on).
+    pub default_options: &'static [(&'static str, &'static str)],
+    /// With no loot catalog chosen, start with the newest bundled `config/windows-smoke-*.json` (Dione's loot).
+    pub auto_loot_catalog: bool,
+    /// Small fixes so the server starts with the launcher's Python: (file, text, replacement), applied after
+    /// each download while the text is still there.
+    pub fixes: &'static [(&'static str, &'static str, &'static str)],
+    /// Installed from its author's zip instead of GitHub: the kit the launcher knows, and where the current one is
+    /// announced (a file in the launcher's own repository, updated when the author posts a new kit).
+    pub kit: Option<Kit>,
+    pub kit_manifest: Option<&'static str>,
+}
+
+/// A server zip on a file host. `sha256` is checked after the download, so a changed file is never installed.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct KitInfo {
+    pub url: String,
+    pub sha256: String,
+    /// What it is, in words ("Kit of 2026-10-29: lz4 fix").
+    pub label: String,
+    /// When its author posted it (shown as the date).
+    #[serde(default)]
+    pub posted: String,
+}
+
+/// The kit compiled into the launcher (`KitInfo` with static text).
+#[derive(Clone, Copy, Debug)]
+pub struct Kit {
+    pub url: &'static str,
+    pub sha256: &'static str,
+    pub label: &'static str,
+    pub posted: &'static str,
+}
+
+impl Kit {
+    pub fn info(&self) -> KitInfo {
+        KitInfo { url: self.url.into(), sha256: self.sha256.into(), label: self.label.into(), posted: self.posted.into() }
+    }
+}
+
+pub const ROE_LIVE: Source = Source {
+    id: "roe-live",
+    name: "ROE-LIVE by general_rj45",
+    repo: "ROE-LIVE/ring-of-elysium-local",
+    branch: "main",
+    folder: "server",
+    names_and_map: true,
+    skip: &[],
+    about: "The original community server, from GitHub: Training on Dione, your own player name, and the map picker's \
+            experimental maps.",
+    maps: &crate::maps::MAPS,
+    map_option: None,
+    default_options: &[
+        ("--kit", "glider"),
+        ("--mode", "cycle"),
+        ("--cycle-scale", "3"),
+        ("--reliable-udp", "true"),
+        ("--idle-handoff", "true"),
+        ("--winter-doors", "true"),
+        ("--winter-windows", "true"),
+        ("--target", "armored"),
+    ],
+    auto_loot_catalog: true,
+    fixes: &[],
+    kit: None,
+    kit_manifest: None,
+};
+
+pub const ROE_RIVIVAL: Source = Source {
+    id: "roe-rivival",
+    name: "RoE-Rivival by livegaming2042",
+    repo: "rapster2042/RoE-Rivival",
+    branch: "main",
+    folder: "server-roe-rivival",
+    names_and_map: false,
+    skip: &["RoE-kit.zip"],
+    about: "livegaming2042's server, built on ROE-LIVE: bots that fight, armour, killfeed, vehicles, and Dione, Europa \
+            and Vera in every mode. Shared as a zip on Google Drive; the launcher fetches the kit he posted last. Its own \
+            lobby keeps the original player name. Its two-client duo mode is not offered.",
+    maps: &crate::maps::RIVIVAL_MAPS,
+    map_option: Some("--map"),
+    // what its own launcher (RoE-Launcher.ps1) starts with
+    default_options: &[
+        ("--mode", "cycle"),
+        ("--room-service", "true"),
+        ("--winter-doors", "true"),
+        ("--winter-windows", "true"),
+        ("--loot-randomize", "true"),
+        ("--live-control", "true"),
+        ("--no-storm", "true"),
+        ("--shared-bots", "20"),
+        ("--vehicle-fleet", "true"),
+    ],
+    auto_loot_catalog: false,
+    // Python 3.12 (Windows) accepts a lone % in argparse help, 3.14 (Linux) refuses to start
+    fixes: &[("tools/windows_launch.py", "(500=50% —", "(500=50%% —")],
+    // livegaming2042's post of 2026-10-29 16:05 on the community Discord ("only pulls modules from its own folders")
+    kit: Some(Kit {
+        url: "https://drive.usercontent.google.com/download?id=1eaHaiRn4kwPyPHHXu5AxwgKTZhWaO_N7&export=download&confirm=t",
+        sha256: "21d06aa7c92f264222d02f6e21b94316882beb54bbc81f8d4b1727c96af42d1f",
+        label: "Kit of 2026-10-29 (Python modules fix)",
+        posted: "2026-10-29",
+    }),
+    kit_manifest: Some("https://raw.githubusercontent.com/darknetcs/roe-launcher/main/sources/roe-rivival.json"),
+};
+
+/// The server a new player starts with (owner's choice, 2026-10-29).
+pub const DEFAULT: Source = ROE_RIVIVAL;
+
+/// In the order the launcher offers them.
+pub const SOURCES: [Source; 2] = [ROE_RIVIVAL, ROE_LIVE];
+
+/// The source saved as `id`; the default for anything unknown.
+pub fn source(id: &str) -> Source {
+    SOURCES.iter().find(|s| s.id == id).copied().unwrap_or(DEFAULT)
+}
+
+/// The same source = the same id.
+impl PartialEq for Source {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Source {}
+
+impl Source {
+    pub fn url(&self) -> String {
+        format!("https://github.com/{}", self.repo)
+    }
+
+    pub fn defaults(&self) -> std::collections::BTreeMap<String, String> {
+        self.default_options.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    /// Applies `fixes` in `dir`; returns the files changed.
+    pub fn apply_fixes(&self, dir: &Path) -> Result<Vec<&'static str>> {
+        let mut changed = Vec::new();
+        for (file, from, to) in self.fixes {
+            let path = dir.join(file);
+            let Ok(text) = fs::read_to_string(&path) else { continue };
+            if text.contains(from) {
+                fs::write(&path, text.replace(from, to))?;
+                changed.push(*file);
+            }
+        }
+        Ok(changed)
+    }
+}
+
+/// Test switch: `ROE_SERVER_KIT=<zip>` installs the chosen source from a local zip of its files instead of GitHub
+/// (RoE-Rivival's newest code is shared only as `RoE-kit.zip`). Its "commit" is `kit-` and the zip's SHA-256.
+pub const KIT_ENV: &str = "ROE_SERVER_KIT";
+/// What a kit carries for its packer only: bundled runtimes, local data and logs, their settings, the kit itself.
+const KIT_SKIP: [&str; 8] = [".tools", "runtime", "runs", "logs", "private", "state", "launcher-settings.json", "RoE-kit.zip"];
+
+pub fn local_kit() -> Option<PathBuf> {
+    std::env::var_os(KIT_ENV).filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+/// ROE-LIVE's `requirements.txt`, for a fork that leaves the file out (RoE-Rivival ships the same packages only
+/// inside its zip).
+const FALLBACK_REQUIREMENTS: &str = "cryptography==50.0.1\nlz4==4.4.5\ncffi==2.1.1\npycparser==3.0\n";
+/// The session key every one of these servers uses (`private/candidate-001.key`, the text "BRING_BACK_ROE!!"): in
+/// ROE-LIVE's repository, left out of RoE-Rivival's (its .gitignore drops `private/`).
+const SESSION_KEY: &[u8] = b"BRING_BACK_ROE!!";
 /// Folders that survive an update: the folders upstream's .gitignore treats as the user's local data.
 /// `runtime/` holds the saved profiles (local-account/, local-accounts/NAME/ with the chosen character and
 /// cosmetics) and caches; `reports/` the exported test reports; `runs/` the session logs; `.tools/` Python/.NET.
@@ -28,6 +212,9 @@ pub struct Remote {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct InstallInfo {
     pub sha: String,
+    /// The repository it came from; empty = ROE-LIVE (installed before there was a choice).
+    #[serde(default)]
+    pub repo: String,
     pub installed_at: u64,
     pub translated: bool,
     pub untranslated: Option<u32>,
@@ -39,10 +226,16 @@ pub(crate) fn agent(secs: u64) -> ureq::Agent {
 
 /// Latest commit on the branch. Tries three sources so one rate limit never blocks updates:
 /// the public Atom feed (no quota), the REST API (60 requests/hour/IP), git smart-HTTP refs.
-pub fn remote_head() -> Result<Remote> {
+pub fn remote_head(src: &Source) -> Result<Remote> {
+    if let Some(kit) = local_kit() {
+        return remote_via_kit(&kit);
+    }
+    if let Some(kit) = current_kit(src) {
+        return Ok(kit_remote(&kit));
+    }
     let mut errs = Vec::new();
-    for (name, f) in [("atom feed", remote_via_atom as fn() -> Result<Remote>), ("GitHub API", remote_via_api), ("git refs", remote_via_refs)] {
-        match f() {
+    for (name, f) in [("atom feed", remote_via_atom as fn(&Source) -> Result<Remote>), ("GitHub API", remote_via_api), ("git refs", remote_via_refs)] {
+        match f(src) {
             Ok(r) => return Ok(r),
             Err(e) => errs.push(format!("{name}: {e}")),
         }
@@ -50,17 +243,99 @@ pub fn remote_head() -> Result<Remote> {
     bail!("could not reach GitHub ({})", errs.join("; "))
 }
 
+/// The kit `src` should run: the one its manifest announces, or the one compiled in when that can't be read.
+/// None = not a kit source.
+pub fn current_kit(src: &Source) -> Option<KitInfo> {
+    let built_in = src.kit?.info();
+    let announced = src.kit_manifest.and_then(|url| {
+        let v: KitInfo = serde_json::from_str(&get_text(url).ok()?).ok()?;
+        (v.sha256.len() == 64 && v.sha256.chars().all(|c| c.is_ascii_hexdigit()) && v.url.starts_with("https://")).then_some(v)
+    });
+    Some(announced.unwrap_or(built_in))
+}
+
+/// A kit's "commit": `kit-` and the start of its SHA-256 (the same for a local copy of the same zip).
+pub fn kit_remote(kit: &KitInfo) -> Remote {
+    Remote { sha: format!("kit-{}", &kit.sha256.to_lowercase()[..24]), message: kit.label.clone(), date: kit.posted.clone() }
+}
+
+/// Downloads `kit` to `dest` and checks its SHA-256. Google Drive answers a large file with a "can't scan it for
+/// viruses" page first; its form gives the real download.
+pub fn download_kit(kit: &KitInfo, dest: &Path, sink: &Sink) -> Result<()> {
+    let mut resp = agent(900).get(&kit.url).call().map_err(|e| anyhow!("download failed: {e}"))?;
+    if resp.content_type().starts_with("text/html") {
+        let page = resp.into_string()?;
+        let field = |name: &str| between(&page, &format!("name=\"{name}\" value=\""), "\"").map(str::to_string);
+        let (Some(id), Some(uuid)) = (field("id"), field("uuid")) else { bail!("the download link answered with a web page instead of the kit") };
+        let url = format!("https://drive.usercontent.google.com/download?id={id}&export=download&confirm=t&uuid={uuid}");
+        resp = agent(900).get(&url).call().map_err(|e| anyhow!("download failed: {e}"))?;
+    }
+    let total: Option<u64> = resp.header("content-length").and_then(|v| v.parse().ok());
+    let mut reader = resp.into_reader();
+    let mut out = fs::File::create(dest)?;
+    let (mut got, mut next) = (0u64, 50u64 << 20);
+    let mut buf = vec![0u8; 1 << 16];
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        std::io::Write::write_all(&mut out, &buf[..n])?;
+        got += n as u64;
+        if got >= next {
+            next += 50 << 20;
+            sink(match total {
+                Some(t) => format!("  {} of {} MB", got >> 20, t >> 20),
+                None => format!("  {} MB", got >> 20),
+            });
+        }
+    }
+    drop(out);
+    let have = crate::runtime::sha256_hex(dest)?;
+    if !have.eq_ignore_ascii_case(&kit.sha256) {
+        let _ = fs::remove_file(dest);
+        bail!("the downloaded kit is not the one announced (SHA-256 {have}): its author may have replaced the file; try again later");
+    }
+    Ok(())
+}
+
+fn remote_via_kit(zip: &Path) -> Result<Remote> {
+    let sha = crate::runtime::sha256_hex(zip).with_context(|| format!("reading {} ({KIT_ENV})", zip.display()))?;
+    Ok(Remote { sha: format!("kit-{}", &sha[..24]), message: format!("Local kit {} ({KIT_ENV})", zip.display()), date: String::new() })
+}
+
+/// Unpacks a kit zip into `dest`, without `KIT_SKIP` and `__pycache__`. Entries outside `dest` are refused.
+pub fn extract_kit(zip_path: &Path, dest: &Path) -> Result<usize> {
+    let mut archive = zip::ZipArchive::new(fs::File::open(zip_path)?).with_context(|| format!("{} is not a valid zip", zip_path.display()))?;
+    let mut n = 0;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        let Some(rel) = entry.enclosed_name() else { bail!("unsafe path in {}: {}", zip_path.display(), entry.name()) };
+        let first = rel.components().next().map(|c| c.as_os_str().to_string_lossy().to_string()).unwrap_or_default();
+        if KIT_SKIP.contains(&first.as_str()) || rel.components().any(|c| c.as_os_str() == "__pycache__") || entry.is_dir() {
+            continue;
+        }
+        let out = dest.join(rel);
+        if let Some(parent) = out.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        std::io::copy(&mut entry, &mut fs::File::create(&out)?)?;
+        n += 1;
+    }
+    Ok(n)
+}
+
 fn get_text(url: &str) -> Result<String> {
     Ok(agent(20).get(url).set("Accept", "*/*").call().map_err(|e| anyhow!("{e}"))?.into_string()?)
 }
 
-fn remote_via_atom() -> Result<Remote> {
-    parse_atom(&get_text(&format!("https://github.com/{REPO}/commits/{BRANCH}.atom"))?)
+fn remote_via_atom(src: &Source) -> Result<Remote> {
+    parse_atom(&get_text(&format!("https://github.com/{}/commits/{}.atom", src.repo, src.branch))?)
 }
 
-fn remote_via_api() -> Result<Remote> {
+fn remote_via_api(src: &Source) -> Result<Remote> {
     let v: serde_json::Value = agent(20)
-        .get(&format!("https://api.github.com/repos/{REPO}/commits/{BRANCH}"))
+        .get(&format!("https://api.github.com/repos/{}/commits/{}", src.repo, src.branch))
         .set("Accept", "application/vnd.github+json")
         .call()
         .map_err(|e| anyhow!("{e}"))?
@@ -68,9 +343,9 @@ fn remote_via_api() -> Result<Remote> {
     parse_remote(&v)
 }
 
-fn remote_via_refs() -> Result<Remote> {
-    let text = get_text(&format!("https://github.com/{REPO}.git/info/refs?service=git-upload-pack"))?;
-    parse_refs(&text)
+fn remote_via_refs(src: &Source) -> Result<Remote> {
+    let text = get_text(&format!("https://github.com/{}.git/info/refs?service=git-upload-pack", src.repo))?;
+    parse_refs(&text, src.branch)
 }
 
 fn unescape_xml(s: &str) -> String {
@@ -95,9 +370,9 @@ pub fn parse_atom(xml: &str) -> Result<Remote> {
     Ok(Remote { sha, message, date })
 }
 
-/// `<sha> refs/heads/main` out of the smart-HTTP advertisement (no message/date available).
-pub fn parse_refs(text: &str) -> Result<Remote> {
-    let marker = format!(" refs/heads/{BRANCH}");
+/// `<sha> refs/heads/<branch>` out of the smart-HTTP advertisement (no message/date available).
+pub fn parse_refs(text: &str, branch: &str) -> Result<Remote> {
+    let marker = format!(" refs/heads/{branch}");
     let i = text.find(&marker).filter(|i| *i >= 40).ok_or_else(|| anyhow!("branch not found"))?;
     let sha = text[i - 40..i].to_string();
     if !sha.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -172,8 +447,8 @@ pub fn update_available(info: Option<&InstallInfo>, remote: &Remote) -> bool {
     info.map(|i| i.sha != remote.sha).unwrap_or(true)
 }
 
-/// Unpacks a GitHub tarball into `dest`, dropping the leading `<repo>-<sha>/` folder.
-pub fn extract_tar_gz<R: Read>(reader: R, dest: &Path) -> Result<usize> {
+/// Unpacks a GitHub tarball into `dest`, dropping the leading `<repo>-<sha>/` folder and the `skip` paths.
+pub fn extract_tar_gz<R: Read>(reader: R, dest: &Path, skip: &[&str]) -> Result<usize> {
     let mut archive = tar::Archive::new(GzDecoder::new(reader));
     let mut n = 0;
     for entry in archive.entries()? {
@@ -185,6 +460,9 @@ pub fn extract_tar_gz<R: Read>(reader: R, dest: &Path) -> Result<usize> {
         let rel: PathBuf = path.components().skip(1).collect();
         // refuse anything that is not a plain relative path (zip-slip protection)
         if rel.as_os_str().is_empty() || rel.components().any(|c| !matches!(c, Component::Normal(_))) {
+            continue;
+        }
+        if skip.iter().any(|s| rel == Path::new(s)) {
             continue;
         }
         let out = dest.join(&rel);
@@ -219,8 +497,29 @@ pub fn swap_in(fresh: &Path, dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Downloads commit `sha` and installs it into `dir`.
-pub fn install(dir: &Path, sha: &str, sink: &Sink) -> Result<()> {
+/// Adds what a fork's repository leaves out but the launcher needs: `requirements.txt` and the session key.
+/// Returns what was added. Only for a server checkout (`tools/windows_launch.py`).
+pub fn fill_in(dir: &Path) -> Result<Vec<&'static str>> {
+    let mut added = Vec::new();
+    if !dir.join("tools/windows_launch.py").is_file() {
+        return Ok(added);
+    }
+    let req = dir.join("requirements.txt");
+    if !req.exists() {
+        fs::write(&req, FALLBACK_REQUIREMENTS)?;
+        added.push("requirements.txt");
+    }
+    let key = dir.join("private/candidate-001.key");
+    if !key.exists() {
+        fs::create_dir_all(dir.join("private"))?;
+        fs::write(&key, SESSION_KEY)?;
+        added.push("private/candidate-001.key");
+    }
+    Ok(added)
+}
+
+/// Downloads commit `sha` of `src` and installs it into `dir`.
+pub fn install(dir: &Path, src: &Source, sha: &str, sink: &Sink) -> Result<()> {
     // An update replaces everything except `.tools/` and `runs/`: never do that to a git checkout.
     if dir.join(".git").exists() {
         bail!(
@@ -228,16 +527,44 @@ pub fn install(dir: &Path, sha: &str, sink: &Sink) -> Result<()> {
             dir.display()
         );
     }
-    let url = format!("https://codeload.github.com/{REPO}/tar.gz/{sha}");
-    sink(format!("Downloading {REPO} @ {}…", &sha[..sha.len().min(10)]));
-    let resp = agent(180).get(&url).call().map_err(|e| anyhow!("download failed: {e}"))?;
+    // never swap one server for another in the same folder: the kept data (profiles, runtime) belongs to the first
+    if let Some(had) = read_info(dir).map(|i| if i.repo.is_empty() { ROE_LIVE.repo.to_string() } else { i.repo }).filter(|r| r != src.repo) {
+        bail!("{} holds {had}, not {}. Choose another folder for this server.", dir.display(), src.repo);
+    }
+    let repo = src.repo;
     let parent = dir.parent().ok_or_else(|| anyhow!("invalid server folder"))?;
     fs::create_dir_all(parent)?;
     let fresh = dir.with_extension("new");
     let _ = fs::remove_dir_all(&fresh);
     fs::create_dir_all(&fresh)?;
-    let n = match extract_tar_gz(resp.into_reader(), &fresh) {
-        Ok(n) => n,
+    let unpacked = if let (true, Some(local)) = (sha.starts_with("kit-"), local_kit()) {
+        sink(format!("Installing {} from the local kit {} ({KIT_ENV}, for testing)…", src.name, local.display()));
+        extract_kit(&local, &fresh)
+    } else if sha.starts_with("kit-") {
+        let kit = current_kit(src).filter(|k| kit_remote(k).sha == sha).ok_or_else(|| anyhow!("the server kit changed meanwhile: check for updates again"))?;
+        sink(format!("Downloading {} — {} — from its author's link (about 250 MB)…", src.name, kit.label));
+        let zip = dir.with_extension("kit.zip");
+        let got = download_kit(&kit, &zip, sink).and_then(|()| extract_kit(&zip, &fresh));
+        let _ = fs::remove_file(&zip);
+        got
+    } else {
+        let url = format!("https://codeload.github.com/{repo}/tar.gz/{sha}");
+        sink(format!("Downloading {repo} @ {}…", &sha[..sha.len().min(10)]));
+        match agent(180).get(&url).call() {
+            Ok(resp) => extract_tar_gz(resp.into_reader(), &fresh, src.skip),
+            Err(e) => Err(anyhow!("download failed: {e}")),
+        }
+    };
+    let n = match unpacked.and_then(|n| Ok((n, fill_in(&fresh)?, src.apply_fixes(&fresh)?))) {
+        Ok((n, added, fixed)) => {
+            if !added.is_empty() {
+                sink(format!("{repo} doesn't include {}: added ROE-LIVE's.", added.join(" and ")));
+            }
+            if !fixed.is_empty() {
+                sink(format!("Fixed {} so it starts with this Python.", fixed.join(", ")));
+            }
+            n
+        }
         Err(e) => {
             let _ = fs::remove_dir_all(&fresh);
             return Err(e.context("unpacking the download"));
@@ -245,7 +572,7 @@ pub fn install(dir: &Path, sha: &str, sink: &Sink) -> Result<()> {
     };
     if !is_installed(&fresh) {
         let _ = fs::remove_dir_all(&fresh);
-        bail!("the download does not look like ring-of-elysium-local");
+        bail!("the download does not look like a server for the launcher (no tools/windows_launch.py)");
     }
     swap_in(&fresh, dir)?;
     // swap_in tries to delete the previous files; say so when that failed instead of leaving a silent copy
@@ -261,6 +588,7 @@ pub fn install(dir: &Path, sha: &str, sink: &Sink) -> Result<()> {
         dir,
         &InstallInfo {
             sha: sha.to_string(),
+            repo: repo.to_string(),
             installed_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
             translated: false,
             untranslated: None,
@@ -294,7 +622,7 @@ mod tests {
     fn extracts_and_strips_the_top_folder() {
         let tmp = tempfile::tempdir().unwrap();
         let data = tarball(&[("repo-abc/requirements.txt", "x"), ("repo-abc/tools/windows_launch.py", "y"), ("repo-abc/a/b/c.txt", "z")]);
-        let n = extract_tar_gz(&data[..], tmp.path()).unwrap();
+        let n = extract_tar_gz(&data[..], tmp.path(), &[]).unwrap();
         assert_eq!(n, 3);
         assert!(is_installed(tmp.path()));
         assert_eq!(fs::read_to_string(tmp.path().join("a/b/c.txt")).unwrap(), "z");
@@ -360,7 +688,7 @@ mod tests {
         let r = parse_atom(atom).unwrap();
         assert_eq!((r.sha.as_str(), r.message.as_str(), r.date.as_str()), ("0636aaaf53d37505d8e9cc8c9cecf81084674c0e", "Fix A & B", "2026-10-16T17:44:57Z"));
         let refs = "001e# service=git-upload-pack\n0000015a0636aaaf53d37505d8e9cc8c9cecf81084674c0e HEAD multi_ack\n003f1111111111111111111111111111111111111111 refs/heads/dev\n003f0636aaaf53d37505d8e9cc8c9cecf81084674c0e refs/heads/main\n";
-        assert_eq!(parse_refs(refs).unwrap().sha, "0636aaaf53d37505d8e9cc8c9cecf81084674c0e");
+        assert_eq!(parse_refs(refs, "main").unwrap().sha, "0636aaaf53d37505d8e9cc8c9cecf81084674c0e");
         assert!(parse_atom("<feed></feed>").is_err());
     }
 
@@ -370,9 +698,124 @@ mod tests {
         fs::create_dir_all(tmp.path().join(".git")).unwrap();
         fs::write(tmp.path().join("my-edit.txt"), "precious").unwrap();
         let sink: Sink = std::sync::Arc::new(|_| {});
-        let err = install(tmp.path(), "0123456789abcdef0123456789abcdef01234567", &sink).unwrap_err();
+        let err = install(tmp.path(), &ROE_LIVE, "0123456789abcdef0123456789abcdef01234567", &sink).unwrap_err();
         assert!(err.to_string().contains("git checkout"));
         assert_eq!(fs::read_to_string(tmp.path().join("my-edit.txt")).unwrap(), "precious");
+    }
+
+    #[test]
+    fn skips_the_listed_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tarball(&[("repo-abc/RoE-kit.zip", "big"), ("repo-abc/tools/windows_launch.py", "y"), ("repo-abc/sub/RoE-kit.zip", "kept")]);
+        assert_eq!(extract_tar_gz(&data[..], tmp.path(), ROE_RIVIVAL.skip).unwrap(), 2);
+        assert!(!tmp.path().join("RoE-kit.zip").exists());
+        assert!(tmp.path().join("sub/RoE-kit.zip").is_file());
+    }
+
+    #[test]
+    fn a_fork_without_requirements_or_key_gets_roe_lives() {
+        let tmp = tempfile::tempdir().unwrap();
+        // not a server checkout: nothing is added
+        assert!(fill_in(tmp.path()).unwrap().is_empty());
+        fs::create_dir_all(tmp.path().join("tools")).unwrap();
+        fs::write(tmp.path().join("tools/windows_launch.py"), "x").unwrap();
+        assert!(!is_installed(tmp.path()));
+        assert_eq!(fill_in(tmp.path()).unwrap(), ["requirements.txt", "private/candidate-001.key"]);
+        assert!(is_installed(tmp.path()));
+        assert!(fs::read_to_string(tmp.path().join("requirements.txt")).unwrap().contains("cryptography=="));
+        assert_eq!(fs::read(tmp.path().join("private/candidate-001.key")).unwrap(), b"BRING_BACK_ROE!!");
+        // the repository's own files are never replaced
+        fs::write(tmp.path().join("requirements.txt"), "own").unwrap();
+        assert!(fill_in(tmp.path()).unwrap().is_empty());
+        assert_eq!(fs::read_to_string(tmp.path().join("requirements.txt")).unwrap(), "own");
+    }
+
+    #[test]
+    fn refuses_a_folder_that_holds_the_other_server() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("keep.txt"), "x").unwrap();
+        // installed before there was a choice: no repo recorded = ROE-LIVE
+        write_info(tmp.path(), &InstallInfo { sha: "a".into(), ..Default::default() }).unwrap();
+        let sink: Sink = std::sync::Arc::new(|_| {});
+        let err = install(tmp.path(), &ROE_RIVIVAL, "0123456789abcdef0123456789abcdef01234567", &sink).unwrap_err();
+        assert!(err.to_string().contains("holds ROE-LIVE/ring-of-elysium-local"), "{err}");
+        assert!(tmp.path().join("keep.txt").is_file());
+    }
+
+    #[test]
+    fn a_kit_is_unpacked_without_its_packers_own_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let zip_path = tmp.path().join("RoE-kit.zip");
+        let mut z = zip::ZipWriter::new(fs::File::create(&zip_path).unwrap());
+        let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        for (name, body) in [
+            ("tools/windows_launch.py", "x"),
+            ("server/directory/a.py", "y"),
+            ("server/directory/__pycache__/a.cpython-312.pyc", "c"),
+            (".tools/python/python.exe", "p"),
+            ("private/candidate-001.key", "k"),
+            ("logs/services.out.log", "l"),
+            ("runtime/zone-set-state.json", "r"),
+            ("launcher-settings.json", "{}"),
+        ] {
+            z.start_file(name, opts).unwrap();
+            std::io::Write::write_all(&mut z, body.as_bytes()).unwrap();
+        }
+        z.finish().unwrap();
+        let dest = tmp.path().join("out");
+        assert_eq!(extract_kit(&zip_path, &dest).unwrap(), 2);
+        assert!(dest.join("tools/windows_launch.py").is_file() && dest.join("server/directory/a.py").is_file());
+        for gone in [".tools", "private", "logs", "runtime", "launcher-settings.json", "server/directory/__pycache__"] {
+            assert!(!dest.join(gone).exists(), "{gone}");
+        }
+        assert_eq!(remote_via_kit(&zip_path).unwrap().sha.len(), "kit-".len() + 24);
+    }
+
+    #[test]
+    fn a_kit_is_known_by_its_hash() {
+        let kit = ROE_RIVIVAL.kit.unwrap().info();
+        assert_eq!(kit.sha256.len(), 64);
+        let r = kit_remote(&kit);
+        assert_eq!(r.sha, format!("kit-{}", &kit.sha256[..24]));
+        assert_eq!(r.date, "2026-10-29");
+        let parsed: KitInfo = serde_json::from_str(include_str!("../../../sources/roe-rivival.json")).unwrap();
+        assert!(parsed.url.starts_with("https://") && parsed.sha256.len() == 64, "the published manifest parses");
+        assert!(ROE_LIVE.kit.is_none() && current_kit(&ROE_LIVE).is_none());
+    }
+
+    #[test]
+    #[ignore = "downloads about 250 MB from Google Drive"]
+    fn live_kit_download_matches_its_hash() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sink: Sink = std::sync::Arc::new(|l| println!("{l}"));
+        let kit = current_kit(&ROE_RIVIVAL).unwrap();
+        download_kit(&kit, &tmp.path().join("kit.zip"), &sink).unwrap();
+        assert!(extract_kit(&tmp.path().join("kit.zip"), &tmp.path().join("out")).unwrap() > 100);
+    }
+
+    #[test]
+    fn the_python_fix_is_applied_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(tmp.path().join("tools")).unwrap();
+        let f = tmp.path().join("tools/windows_launch.py");
+        fs::write(&f, "help='Минимум HP участника (500=50% — наблюдение без смерти)'").unwrap();
+        assert_eq!(ROE_RIVIVAL.apply_fixes(tmp.path()).unwrap(), ["tools/windows_launch.py"]);
+        assert!(fs::read_to_string(&f).unwrap().contains("(500=50%% —"));
+        assert!(ROE_RIVIVAL.apply_fixes(tmp.path()).unwrap().is_empty());
+        assert!(ROE_LIVE.apply_fixes(tmp.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn unknown_sources_fall_back_to_the_default() {
+        assert_eq!(source("roe-live"), ROE_LIVE);
+        assert_eq!(source("nope"), ROE_RIVIVAL);
+        assert_eq!(source(""), DEFAULT);
+        let ids: Vec<_> = SOURCES.iter().map(|s| s.id).collect();
+        assert_eq!(ids, ["roe-rivival", "roe-live"]);
+        // people tell the servers apart by their authors
+        assert!(ROE_RIVIVAL.name.ends_with("by livegaming2042") && ROE_LIVE.name.ends_with("by general_rj45"));
+        let folders: std::collections::HashSet<_> = SOURCES.iter().map(|s| s.folder).collect();
+        assert_eq!(folders.len(), SOURCES.len(), "each source needs its own folder");
     }
 
     #[test]

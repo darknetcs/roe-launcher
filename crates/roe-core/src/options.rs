@@ -49,8 +49,20 @@ runpy.run_path(script, run_name="__main__")
 
 /// Options the launcher sets itself, or that cannot work with how it starts the server: never shown.
 /// `--debug-console` belongs to the game client and windows_launch.py refuses it with `--services-only`.
-pub const MANAGED: [&str; 10] =
-    ["--client", "--dotnet", "--key-file", "--verify-only", "--remote-peer", "--lan-tunnel", "--services-only", "--duration", "--debug-console", "--profile"];
+/// `--map` is RoE-Rivival's map, set by the launcher's map picker (`Source::map_option`).
+pub const MANAGED: [&str; 11] = [
+    "--client",
+    "--dotnet",
+    "--key-file",
+    "--verify-only",
+    "--remote-peer",
+    "--lan-tunnel",
+    "--services-only",
+    "--duration",
+    "--debug-console",
+    "--profile",
+    "--map",
+];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ServerOption {
@@ -96,22 +108,10 @@ impl ServerOption {
     }
 }
 
-/// What the launcher has always started the server with (the same as upstream's play.cmd).
+/// What the launcher has always started ROE-LIVE with (the same as upstream's play.cmd); see `Source::defaults`.
 /// `--loot-catalog` is not here: when unset, the newest bundled catalog is picked automatically.
 pub fn launcher_defaults() -> BTreeMap<String, String> {
-    [
-        ("--kit", "glider"),
-        ("--mode", "cycle"),
-        ("--cycle-scale", "3"),
-        ("--reliable-udp", "true"),
-        ("--idle-handoff", "true"),
-        ("--winter-doors", "true"),
-        ("--winter-windows", "true"),
-        ("--target", "armored"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_string(), v.to_string()))
-    .collect()
+    crate::update::ROE_LIVE.defaults()
 }
 
 /// The JSON printed by the helper, minus what the launcher manages or the user cannot leave out.

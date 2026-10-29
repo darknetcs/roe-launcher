@@ -9,6 +9,7 @@ mod theme;
 use eframe::egui;
 
 /// A crash is written to the end of `launcher.log`: on Windows there is no console to show it.
+/// A crash of the window (main thread) also stops the server the launcher started.
 fn log_panics() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -17,12 +18,19 @@ fn log_panics() {
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
             let _ = writeln!(f, "[crash] {info}\n{}", std::backtrace::Backtrace::force_capture());
         }
+        // a panic on the main thread ends the launcher without on_exit: don't leave the server running
+        if std::thread::current().name() == Some("main") {
+            roe_core::process::stop_owned(std::time::Duration::from_secs(5));
+        }
         default(info);
     }));
 }
 
 fn main() -> eframe::Result {
     log_panics();
+    // the server's Python must use only its own packages, never ones the player installed for another Python
+    // (a missing package then works on one PC and fails on the next; RoE-Rivival's lz4 on 2026-10-29)
+    std::env::set_var("PYTHONNOUSERSITE", "1");
     // `ROE_WINDOW_SIZE=1600x900` (development): start at another size, e.g. to check layouts with ROE_SCREENSHOT
     let size = std::env::var("ROE_WINDOW_SIZE")
         .ok()

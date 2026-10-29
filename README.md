@@ -69,16 +69,17 @@ The first start downloads what the server needs (a few hundred MB), then startup
 
 | Area | Details |
 |---|---|
+| **Servers** | Two community servers, chosen on the Updates page and named next to PLAY. **RoE-Rivival by livegaming2042** (the default): bots that fight back, armour, killfeed, vehicles, and Dione, Europa and Vera in every mode (Play, Training, Customs). He shares it as a zip on Google Drive; the launcher downloads the kit he posted last and installs it only if its SHA-256 matches. **ROE-LIVE by general_rj45**: the original server from GitHub, Training on Dione, with your own player name. Each server has its own folder and its own match options, so switching never mixes them. |
 | **Play** | One button: prepares the server, starts it, waits until its ports are up, then starts the game. When the game closes, the server it started is stopped again. You can also run the server on its own. |
 | **Server Settings** | Every match option the installed server offers, read from the server itself and grouped (Match, Targets & bots, Map & world, Vehicles, Network). New upstream options show up after an update without a launcher release. Includes **practice targets** (up to 10 targets on the map) and live control. Clear error messages when the server refuses a combination. |
 | **Tencent crash reporter** | Game page: optionally **block TQMCenter**, the game's own crash and telemetry collector that can report to Tencent. No game file is changed; untick to allow it again. See [PRIVACY.md](PRIVACY.md). |
 | **Player name** | Your own name in the lobby, on the map selection, in the newspaper and on the stats screen (Server Settings → Player name; up to 16 English letters, digits, spaces and symbols). Everyone starts as **BRING_BACK_ROE!!**, the original server's name, now shown in the match too. Applied each time the server starts, so it survives server updates. Empty restores the server's untouched files (the match then says "LOCAL"). |
-| **Map** *(experimental)* | Server Settings → Map. **Dione** is the community server's map and works in Training. **Kill Zone** can be picked for testing: it loads and plays, but you can't extract (the helicopter appears outside the final zone, too high to reach). **Desert** (you fall through the ground) and **Dione at night** (the game freezes at the start) are shown greyed out. The server only has Dione's spawn points, loot, zones and evacuation, so other maps need server support first. A warning next to PLAY reminds you when an experimental map is selected. |
+| **Map** | Server Settings → Map, for the chosen server. **RoE-Rivival:** Dione, Europa and Vera; Dione at night is untested by its author, and Europa Season 3 needs a game patch the launcher doesn't apply. In Customs, pick the same map as in the launcher. **ROE-LIVE** *(experimental beyond Dione)*: **Dione** is the community server's map and works in Training. **Kill Zone** can be picked for testing: it loads and plays, but you can't extract (the helicopter appears outside the final zone, too high to reach). **Desert** (you fall through the ground) and **Dione at night** (the game freezes at the start) are shown greyed out. The server only has Dione's spawn points, loot, zones and evacuation, so other maps need server support first. A warning next to PLAY reminds you when an experimental map is selected. |
 | **Server status** | Live indicators for the lobby (TCP 9001), proxy (TCP 8001) and endpoint (UDP 18001), uptime, pid, and the server's own output. A server you started yourself is detected and left alone. |
 | **Install via Steam** | When no game is found, the main button asks Steam to install it (Steam is called directly, so it works even without a `steam://` link handler; manual steps and a copyable link if Steam can't be reached). While Steam downloads it shows **INSTALLING…**, and it only uses the game once Steam reports the install complete, also when the download was started in Steam itself. |
 | **Game location** | Found automatically in your Steam libraries, including libraries on other drives (Linux: `libraryfolders.vdf` of native or Flatpak Steam; Windows: Steam's registry entry). You can always browse or paste a path. The `Europa_Client.exe` hash is checked against the supported 2022 build. |
 | **Proton** *(Linux)* | Reads Steam's compatibility tools: GE-Proton, Proton-CachyOS, Proton-EM, UMU-Proton, Valve's Proton, anything with a `proton` script. Choose a fixed version, *"always the newest GE-Proton / CachyOS / …"*, or any custom folder. |
-| **Server updates** | Keeps its own copy of the server files and updates it from GitHub (exact-commit download; keeps your saved profiles, the Python/.NET tools, run logs and reports). Optionally re-applies the bundled **English translation** after every update. |
+| **Server updates** | Keeps its own copy of the server files and updates it: ROE-LIVE from GitHub, RoE-Rivival from the newest kit its author posted (exact download, checked by hash; keeps your saved profiles, the Python/.NET tools, run logs and reports). Optionally re-applies the bundled **English translation** after every update. |
 | **Launcher updates** | Checks this project's releases at start. *Update now* downloads the package for your system, installs it only if it matches the release's SHA-256 file and replaces the launcher in place; *Restart now* opens the new version (not while the game or server runs). |
 | **Server Browser** *(preview)* | Your local server, servers you save, launchers found on your network and an optional online list, with search, filters and favourites. **LAN play:** host a Training session on one computer and **Join** it from another on the same network, or over **Hamachi** or **Radmin VPN** (see [Playing on your network](#playing-on-your-network-lan)). Other internet servers can't be joined yet. |
 | **Discord** | *Discord* and *GitHub* buttons in the sidebar. Optional **Rich Presence** (Appearance → Discord, off by default): friends see "Playing Ring of Elysium" and whether you're in the launcher, hosting a server or in a match, with links to the community and the launcher. Works with the regular, Flatpak and Snap Discord apps, and only while Discord runs on your computer. |
@@ -237,7 +238,11 @@ genuine file, please let us know; we report false positives to the vendors.
 
 ## Known limitations
 
-* **Only Training is implemented** by the community server; other game modes don't exist yet.
+* **ROE-LIVE implements only Training**; RoE-Rivival also has Play and Customs. Neither has real
+  player-against-player multiplayer yet.
+* **RoE-Rivival:** its own lobby keeps the original player name (BRING_BACK_ROE!!), its two-client duo mode is not
+  offered (it patches the second game in memory, which the launcher never does), and LAN play has only been tested
+  with ROE-LIVE.
 * **Internet servers can't be joined yet.** LAN play works, also over Hamachi or Radmin VPN (see above); joining
   other servers over the internet is planned.
 * **Practice targets vs. Bots:** the server's scripted bot (*Bots*) needs *Target* set to `none`, so it can't be
@@ -290,8 +295,10 @@ launcher forwards TCP 28001 → 8001 and 29001 → 19001 (private addresses only
 
 ## Credits
 
-* **[ROE-LIVE](https://github.com/ROE-LIVE/ring-of-elysium-local)** for the community local server the launcher
-  runs, and its profiles, LAN tunnel and translations.
+* **livegaming2042** ([RoE-Rivival](https://github.com/rapster2042/RoE-Rivival)) for his server with bots, armour,
+  vehicles and three maps, shared freely with the community as kits on Discord.
+* **general_rj45 and [ROE-LIVE](https://github.com/ROE-LIVE/ring-of-elysium-local)** for the community local server
+  the launcher was built on, and its profiles, LAN tunnel and translations.
 * **awpstar** ([MLVP](https://github.com/MLVP)) and the four people working with them on
   [roe_server_previw](https://github.com/MLVP/roe_server_previw), for sharing their server work (user accounts,
   lobby, map modes) and their permission to use it in the launcher.
