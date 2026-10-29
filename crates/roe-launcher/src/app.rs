@@ -184,6 +184,8 @@ pub struct App {
     // the launcher's own updates
     pub launcher_release: Option<Result<Release, String>>,
     pub launcher_checking: bool,
+    /// The warning shown before test builds are switched on (Updates page).
+    pub test_builds_warning: bool,
     pub launcher_updating: bool,
     /// Tag of a newer launcher that is installed and waits for a restart.
     pub launcher_installed: Option<String>,
@@ -285,6 +287,7 @@ impl App {
             schema_loading: false,
             launcher_release: None,
             launcher_checking: false,
+            test_builds_warning: false,
             launcher_updating: false,
             launcher_installed: None,
             launcher_error: None,
@@ -1051,10 +1054,16 @@ impl App {
                         }
                     }
                     stage("Starting the server…");
+                    // a session shorter than one match would end it halfway (slow storms take hours)
+                    let mut duration = cfg.server_duration;
+                    if src.switches && duration < roe_core::switches::match_seconds(&cfg.options()) {
+                        duration = roe_core::switches::match_seconds(&cfg.options()).min(server::MAX_DURATION);
+                        l_sink(format!("Session length raised to {} minutes so a whole match fits at this storm pace.", duration / 60));
+                    }
                     let settings = server::Settings {
                         dir: dir.clone(),
                         game_dir: game_dir.clone(),
-                        duration: cfg.server_duration,
+                        duration,
                         extra_args: cfg.server_extra_args.clone(),
                         lan_tunnel: cfg.lan_host,
                         options,
@@ -1100,11 +1109,20 @@ impl App {
             return;
         }
         self.launcher_checking = true;
-        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        let (tx, ctx, test_builds) = (self.tx.clone(), self.ctx.clone(), self.cfg.launcher_test_builds);
         std::thread::spawn(move || {
-            let r = selfupdate::latest().map_err(|e| format!("{e:#}"));
+            let r = selfupdate::latest(test_builds).map_err(|e| format!("{e:#}"));
             App::emit(&tx, &ctx, Event::LauncherRelease(r));
         });
+    }
+
+    /// Switches test builds on or off and asks GitHub again.
+    pub fn set_test_builds(&mut self, on: bool) {
+        self.cfg.launcher_test_builds = on;
+        self.test_builds_warning = false;
+        self.launcher_release = None;
+        self.log(Src::Launcher, if on { "Test builds of the launcher are on: pre-releases are offered as updates." } else { "Test builds are off: only main releases are offered." }.into());
+        self.check_launcher();
     }
 
     /// A newer launcher is published and not installed yet.

@@ -12,6 +12,9 @@ pub const LOBBY_PORT: u16 = 9001;
 pub const PROXY_PORT: u16 = 8001;
 pub const UDP_PORT: u16 = 18001;
 
+/// The longest session: RoE-Rivival's slowest storm (×10) takes about 5.4 hours.
+pub const MAX_DURATION: u32 = 21600;
+
 #[derive(Clone, Debug)]
 pub struct Settings {
     pub dir: PathBuf,
@@ -47,7 +50,7 @@ pub fn build_args(s: &Settings, dotnet: &Path) -> Vec<String> {
     let mut a: Vec<String> = ["--services-only", "--client"].map(String::from).to_vec();
     a.push(s.game_dir.display().to_string());
     a.extend(["--dotnet".into(), dotnet.display().to_string(), "--duration".into()]);
-    a.push(s.duration.clamp(120, 7200).to_string());
+    a.push(s.duration.clamp(120, MAX_DURATION).to_string());
     a.extend(s.options.iter().cloned());
     // no catalog chosen: the newest bundled one, as play.cmd does
     if s.auto_loot_catalog && !s.options.iter().any(|x| x == "--loot-catalog") {
@@ -288,7 +291,7 @@ mod tests {
         };
         let a = build_args(&s, Path::new("/usr/bin/dotnet"));
         let joined = a.join(" ");
-        assert!(joined.starts_with("--services-only --client /g/Ring of Elysium --dotnet /usr/bin/dotnet --duration 7200"));
+        assert!(joined.starts_with("--services-only --client /g/Ring of Elysium --dotnet /usr/bin/dotnet --duration 21600"));
         for part in ["--kit glider", "--mode cycle", "--cycle-scale 3", "--reliable-udp", "--idle-handoff", "--winter-doors", "--winter-windows", "--target armored"] {
             assert!(joined.contains(part), "{part}");
         }

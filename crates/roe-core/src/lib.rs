@@ -19,6 +19,7 @@ pub mod selfupdate;
 pub mod server;
 pub mod servers;
 pub mod steam;
+pub mod switches;
 pub mod telemetry;
 pub mod translate;
 pub mod update;

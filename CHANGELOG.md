@@ -3,6 +3,18 @@
 All notable changes to roe-launcher. Full release notes and downloads:
 <https://github.com/darknetcs/roe-launcher/releases>.
 
+## v0.1.13-test.2 — 2026-10-29 (pre-release)
+
+* **RoE-Rivival match switches** (Server Settings → Match), the ones of livegaming2042's own launcher: **bots**
+  (now up to 64), **storm / ash zone** on or off with its pace (retail ~32 min up to ×10), **vehicles**, **half
+  health** for testing, and **Back up and reset game settings** for the glider that never lands (it warns when your
+  settings have the problem his launcher looks for). They change the same values as Match options below.
+* Sessions can run up to 6 hours, and for RoE-Rivival the session is made long enough for a whole match at the
+  chosen storm pace.
+* **Test builds:** Updates → "Include test builds (pre-releases)" offers pre-releases as launcher updates, after a
+  warning that they are highly experimental and only for testing and reporting bugs. A test build now counts as
+  older than its final version, so testers get the main release when it is out.
+
 ## v0.1.13-test.1 — 2026-10-29 (pre-release)
 
 ### Two servers

@@ -374,6 +374,83 @@ impl App {
         }
     }
 
+    /// RoE-Rivival's own launcher switches (`roe_core::switches`), on the same values as Match options below.
+    fn match_switches_card(&mut self, ui: &mut Ui, pal: &Palette) {
+        use roe_core::switches as sw;
+        ui.label(RichText::new("Match").strong());
+        muted(ui, pal, format!("The switches of {}'s own launcher. Takes effect the next time the server starts.", self.cfg.source().name.rsplit(" by ").next().unwrap_or("")));
+        ui.add_space(4.0);
+        let v = self.cfg.options_mut();
+        let mut bots_on = sw::bots(v) > 0;
+        let mut count = if bots_on { sw::bots(v) } else { 20 };
+        form_row_w(ui, "Bots", 200.0, |ui| {
+            let a = ui.checkbox(&mut bots_on, "").changed();
+            let b = ui.add_enabled(bots_on, egui::Slider::new(&mut count, 1..=sw::BOTS_MAX).suffix(" bots")).changed();
+            if a || b {
+                sw::set_bots(v, if bots_on { count } else { 0 });
+            }
+        });
+        let mut storm = sw::storm(v);
+        let mut pace = sw::pace(v);
+        form_row_w(ui, "Storm / ash zone", 200.0, |ui| {
+            let text = if storm { "shrinks" } else { "off: the whole map stays safe" };
+            if ui.checkbox(&mut storm, text).changed() {
+                sw::set_storm(v, storm);
+            }
+            ui.add_enabled_ui(storm, |ui| {
+                let label = sw::PACES.iter().find(|p| p.0 == pace).map(|p| p.1.to_string()).unwrap_or_else(|| format!("×{pace}"));
+                egui::ComboBox::from_id_salt("storm-pace").selected_text(label).show_ui(ui, |ui| {
+                    for (scale, name) in sw::PACES {
+                        if ui.selectable_value(&mut pace, scale, name).clicked() {
+                            sw::set_pace(v, scale);
+                        }
+                    }
+                });
+            });
+        });
+        let mut fleet = sw::fleet(v);
+        form_row_w(ui, "Vehicles", 200.0, |ui| {
+            if ui.checkbox(&mut fleet, "cars, and boats on the lake").changed() {
+                sw::set_fleet(v, fleet);
+            }
+        });
+        let mut half = sw::half_health(v);
+        form_row_w(ui, "Half health", 200.0, |ui| {
+            if ui.checkbox(&mut half, "nobody drops below half health (for testing)").changed() {
+                sw::set_half_health(v, half);
+            }
+        });
+        let need = sw::match_seconds(v);
+        if self.cfg.server_duration < need {
+            muted(ui, pal, format!("A match at this pace takes up to {} minutes: the session is made that long when the server starts.", need / 60));
+        }
+        ui.add_space(6.0);
+        let game = self.cfg.game_dir.clone();
+        let poisoned = game.as_deref().is_some_and(sw::settings_poisoned);
+        ui.horizontal(|ui| {
+            let can = game.is_some() && !self.client_running();
+            if ui.add_enabled(can, egui::Button::new("Back up and reset game settings")).on_hover_text(
+                "Moves the game's UserData folder (graphics, keys, sound) into a backup in the launcher's data folder; the game makes \
+                 clean settings next time. Fixes the glider that never lands or drops you through the floor.",
+            ).clicked() {
+                if let Some(g) = &game {
+                    let msg = match sw::reset_game_settings(g, &roe_core::util::data_dir().join("userdata-backups")) {
+                        Ok(Some(b)) => format!("Game settings reset; the old ones are in {}.", b.display()),
+                        Ok(None) => "The game has no saved settings yet: nothing to reset.".to_string(),
+                        Err(e) => format!("Could not reset the game settings: {e:#}"),
+                    };
+                    self.log(Src::Launcher, msg);
+                }
+            }
+            if poisoned {
+                ui.colored_label(pal.warn, "⚠ Your settings have the glider-landing problem: reset them.");
+            } else {
+                muted(ui, pal, "If the glider never lands.");
+            }
+        });
+        muted(ui, pal, "Its two-client duo mode is not offered: it patches the second game in memory, which the launcher never does.");
+    }
+
     fn player_name_card(&mut self, ui: &mut Ui, pal: &Palette) {
         ui.label(RichText::new("Player").strong());
         self.profile_picker(ui, pal);
@@ -883,10 +960,14 @@ impl App {
         ui.add_space(10.0);
         card(ui, pal, op, |ui| self.map_card(ui, pal));
         ui.add_space(10.0);
+        if self.cfg.source().switches {
+            card(ui, pal, op, |ui| self.match_switches_card(ui, pal));
+            ui.add_space(10.0);
+        }
         card(ui, pal, op, |ui| {
             ui.label(RichText::new("Session").strong());
             form_row_w(ui, "Session length (seconds)", 200.0, |ui| {
-                ui.add(egui::Slider::new(&mut self.cfg.server_duration, 120..=7200));
+                ui.add(egui::Slider::new(&mut self.cfg.server_duration, 120..=server::MAX_DURATION));
             });
             form_row_w(ui, "Keep session logs", 200.0, |ui| {
                 ui.add(egui::DragValue::new(&mut self.cfg.keep_runs).range(0..=1000).suffix(" newest"));
@@ -1341,6 +1422,14 @@ impl App {
         ui.add_space(10.0);
         card(ui, pal, op, |ui| {
             ui.checkbox(&mut self.cfg.check_launcher_updates, "Check for a new launcher version when it starts");
+            let mut test = self.cfg.launcher_test_builds;
+            if ui.checkbox(&mut test, "Include test builds (pre-releases): highly experimental").changed() {
+                if test {
+                    self.test_builds_warning = true;
+                } else {
+                    self.set_test_builds(false);
+                }
+            }
             ui.checkbox(&mut self.cfg.check_updates_on_start, "Check for server file updates when the launcher starts");
             ui.checkbox(&mut self.cfg.translate_after_update, "Translate comments and messages to English after each update");
             let n = self.report.as_ref().map(|r| r.untranslated).or(self.info.as_ref().and_then(|i| i.untranslated));
@@ -1350,6 +1439,9 @@ impl App {
         });
         if let Some(s) = switch_to {
             self.switch_server_source(s);
+        }
+        if self.test_builds_warning {
+            self.test_builds_modal(ui, pal);
         }
         if check {
             self.check_updates();
@@ -1375,6 +1467,43 @@ impl App {
                 other => (pal.warn, other.to_string()),
             };
             status_line(ui, c, t);
+        }
+    }
+
+    /// Shown when "Include test builds" is ticked: they are only switched on from here.
+    fn test_builds_modal(&mut self, ui: &mut Ui, pal: &Palette) {
+        let (mut enable, mut cancel) = (false, false);
+        let m = egui::Modal::new(egui::Id::new("test-builds-warning")).show(ui.ctx(), |ui| {
+            ui.set_max_width(480.0);
+            ui.label(RichText::new("⚠ Test builds are highly experimental").size(18.0).strong().color(pal.warn));
+            ui.add_space(8.0);
+            ui.label(
+                "The launcher itself is still experimental software, and test builds are an experiment on top of it. They are \
+                 only for testing new features and catching bugs before they reach the main builds: expect things to break.",
+            );
+            ui.add_space(6.0);
+            ui.label(
+                "If you use them, please report every problem you hit and your suggestions, so they can be fixed and make it \
+                 into the main builds.",
+            );
+            ui.add_space(6.0);
+            muted(ui, pal, "You can untick this at any time; the next main build then replaces the test build.");
+            ui.add_space(4.0);
+            ui.hyperlink_to("Report an issue or a suggestion on GitHub", crate::app::ISSUES_URL);
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui.add(egui::Button::new("I understand, include test builds").fill(pal.warn.gamma_multiply(0.45))).clicked() {
+                    enable = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    cancel = true;
+                }
+            });
+        });
+        if enable {
+            self.set_test_builds(true);
+        } else if cancel || m.should_close() {
+            self.test_builds_warning = false;
         }
     }
 

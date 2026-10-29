@@ -123,6 +123,8 @@ pub struct Config {
     pub check_updates_on_start: bool,
     /// Look for a newer launcher on GitHub when it starts.
     pub check_launcher_updates: bool,
+    /// Also offer test builds (pre-releases) of the launcher. Off by default; switching it on shows a warning.
+    pub launcher_test_builds: bool,
     pub translate_after_update: bool,
     pub stop_server_on_game_exit: bool,
     pub proton_log: bool,
@@ -187,6 +189,7 @@ impl Default for Config {
             server_dirs: BTreeMap::new(),
             check_updates_on_start: true,
             check_launcher_updates: true,
+            launcher_test_builds: false,
             translate_after_update: true,
             stop_server_on_game_exit: true,
             proton_log: false,

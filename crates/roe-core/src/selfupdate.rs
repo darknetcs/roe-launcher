@@ -51,17 +51,50 @@ pub fn asset_name() -> &'static str {
     }
 }
 
-/// "v0.1.10" > "0.1.9"; a pre-release suffix ("-rc1") counts as its numbers.
+/// "v0.1.10" > "0.1.9". A test build ("0.1.13-test.2") comes after the release before it and before its own final
+/// version, so a tester is offered 0.1.13 once it is out; test builds of one version compare by their numbers.
 pub fn is_newer(tag: &str, current: &str) -> bool {
-    version_key(tag.trim_start_matches('v')) > version_key(current.trim_start_matches('v'))
+    order_key(tag) > order_key(current)
 }
 
-/// The newest published release.
-pub fn latest() -> Result<Release> {
+/// (version numbers, 1 for a final release / 0 for a test build, the test build's numbers)
+fn order_key(v: &str) -> (Vec<u64>, u8, Vec<u64>) {
+    let v = v.trim().trim_start_matches('v');
+    match v.split_once('-') {
+        Some((base, pre)) => (version_key(base), 0, version_key(pre)),
+        None => (version_key(v), 1, Vec::new()),
+    }
+}
+
+/// The newest published release; with `test_builds`, pre-releases count too (the newest of all, by version).
+pub fn latest(test_builds: bool) -> Result<Release> {
+    if test_builds {
+        if let Ok(r) = newest_including_test_builds() {
+            return Ok(r);
+        }
+    }
     match latest_via_api() {
         Ok(r) => Ok(r),
         Err(api) => latest_via_redirect().map_err(|e| anyhow!("could not check for launcher updates ({api}; {e})")),
     }
+}
+
+fn newest_including_test_builds() -> Result<Release> {
+    let v: serde_json::Value = crate::update::agent(15)
+        .get(&format!("https://api.github.com/repos/{REPO}/releases?per_page=30"))
+        .call()
+        .map_err(|e| anyhow!("GitHub API: {e}"))?
+        .into_json()?;
+    newest_of(&v).ok_or_else(|| anyhow!("GitHub API: no releases"))
+}
+
+/// The highest version among published (not draft) releases of a `releases` listing.
+pub fn newest_of(list: &serde_json::Value) -> Option<Release> {
+    list.as_array()?
+        .iter()
+        .filter(|r| !r["draft"].as_bool().unwrap_or(false))
+        .filter_map(|r| Some(Release { tag: r["tag_name"].as_str()?.to_string(), notes: r["body"].as_str().unwrap_or_default().to_string() }))
+        .max_by(|a, b| order_key(&a.tag).cmp(&order_key(&b.tag)))
 }
 
 fn latest_via_api() -> Result<Release> {
@@ -321,6 +354,25 @@ mod tests {
         assert!(is_newer("v1.0.0", "0.9.9"));
         assert!(!is_newer("v0.1.0", "0.1.0"));
         assert!(!is_newer("v0.0.9", "0.1.0"));
+        // test builds sit between the release before and their own final version
+        assert!(is_newer("v0.1.13-test.1", "0.1.12"));
+        assert!(is_newer("v0.1.13", "0.1.13-test.2"));
+        assert!(is_newer("v0.1.13-test.2", "0.1.13-test.1"));
+        assert!(!is_newer("v0.1.13-test.1", "0.1.13"));
+        assert!(!is_newer("v0.1.12", "0.1.13-test.1"));
+    }
+
+    #[test]
+    fn test_builds_join_only_when_asked() {
+        let list: serde_json::Value = serde_json::from_str(
+            r#"[{"tag_name":"v0.1.13-test.1","draft":false,"prerelease":true,"body":"t"},
+                {"tag_name":"v0.1.14-test.1","draft":true,"prerelease":true},
+                {"tag_name":"v0.1.12","draft":false,"prerelease":false,"body":"s"}]"#,
+        )
+        .unwrap();
+        assert_eq!(newest_of(&list).unwrap().tag, "v0.1.13-test.1", "drafts never count");
+        let with_final: serde_json::Value = serde_json::from_str(r#"[{"tag_name":"v0.1.13-test.1"},{"tag_name":"v0.1.13"}]"#).unwrap();
+        assert_eq!(newest_of(&with_final).unwrap().tag, "v0.1.13");
     }
 
     #[test]
@@ -462,9 +514,12 @@ mod tests {
     #[test]
     #[ignore]
     fn live_installs_the_published_release_into_a_temp_folder() {
-        let r = latest().unwrap();
+        let r = latest(false).unwrap();
         // the fallback (no API quota) must find the same release
         assert_eq!(latest_via_redirect().unwrap().tag, r.tag);
+        // with test builds the newest pre-release (or a newer main release) is offered instead
+        let t = latest(true).unwrap();
+        assert!(!is_newer(&r.tag, &t.tag), "{} vs {}", r.tag, t.tag);
         let tmp = tempfile::tempdir().unwrap();
         let exe = tmp.path().join(if cfg!(windows) { "roe-launcher.exe" } else { "roe-launcher" });
         fs::write(&exe, b"old").unwrap();

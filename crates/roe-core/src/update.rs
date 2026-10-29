@@ -41,6 +41,8 @@ pub struct Source {
     /// announced (a file in the launcher's own repository, updated when the author posts a new kit).
     pub kit: Option<Kit>,
     pub kit_manifest: Option<&'static str>,
+    /// Server Settings shows its own launcher's match switches (`switches`).
+    pub switches: bool,
 }
 
 /// A server zip on a file host. `sha256` is checked after the download, so a changed file is never installed.
@@ -96,6 +98,7 @@ pub const ROE_LIVE: Source = Source {
     fixes: &[],
     kit: None,
     kit_manifest: None,
+    switches: false,
 };
 
 pub const ROE_RIVIVAL: Source = Source {
@@ -134,6 +137,7 @@ pub const ROE_RIVIVAL: Source = Source {
         posted: "2026-10-29",
     }),
     kit_manifest: Some("https://raw.githubusercontent.com/darknetcs/roe-launcher/main/sources/roe-rivival.json"),
+    switches: true,
 };
 
 /// The server a new player starts with (owner's choice, 2026-10-29).
