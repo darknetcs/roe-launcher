@@ -589,6 +589,10 @@ impl App {
         });
         ui.add_space(4.0);
         match maps::by_id(all, current) {
+            // RoE-Rivival hosts its maps itself: its note says what is untested
+            Some(m) if m.support == Support::Experimental && self.cfg.source().map_option.is_some() => {
+                ui.colored_label(pal.warn, format!("{} is experimental: {}", m.name, m.note));
+            }
             Some(m) if m.support == Support::Experimental => {
                 ui.colored_label(
                     pal.warn,
@@ -600,6 +604,33 @@ impl App {
                 );
             }
             _ => muted(ui, pal, "Takes effect the next time the server starts. More maps unlock as the community server supports them."),
+        }
+        // every server so far takes --start-hour with these four periods of the map's day (asked for on Discord)
+        let known = self.schema.as_ref().and_then(|s| s.as_ref().ok()).map(|s| s.iter().any(|o| o.flag == "--start-hour"));
+        if known != Some(false) {
+            ui.add_space(6.0);
+            let v = self.cfg.options_mut();
+            let mut hour: u32 = v.get("--start-hour").and_then(|h| h.trim().parse().ok()).unwrap_or(8);
+            form_row_w(ui, "Time of day", 200.0, |ui| {
+                let name = |h: u32| match h {
+                    7 => "Morning, 07:00",
+                    15 => "Afternoon, 15:00",
+                    16 => "Afternoon, 16:00",
+                    _ => "Morning, 08:00 (default)",
+                };
+                egui::ComboBox::from_id_salt("start-hour").selected_text(name(hour)).show_ui(ui, |ui| {
+                    for h in [7, 8, 15, 16] {
+                        if ui.selectable_value(&mut hour, h, name(h)).clicked() {
+                            if h == 8 {
+                                v.remove("--start-hour");
+                            } else {
+                                v.insert("--start-hour".into(), h.to_string());
+                            }
+                        }
+                    }
+                });
+                muted(ui, pal, "the servers offer these four; night needs the Dione at night map");
+            });
         }
     }
 
@@ -1369,7 +1400,7 @@ impl App {
                         }
                     });
                 });
-                ui.hyperlink_to("GitHub", src.url());
+                ui.hyperlink_to(if src.kit_folder.is_some() { "Kit folder" } else { "GitHub" }, src.page);
             });
             muted(ui, pal, src.about);
             muted(ui, pal, format!("Folder: {}", self.cfg.server_dir_or_default().display()));

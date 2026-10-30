@@ -69,7 +69,7 @@ The first start downloads what the server needs (a few hundred MB), then startup
 
 | Area | Details |
 |---|---|
-| **Servers** | Two community servers, chosen on the Updates page and named next to PLAY. **RoE-Rivival by livegaming2042** (the default): bots that fight back, armour, killfeed, vehicles, and Dione, Europa and Vera in every mode (Play, Training, Customs). He shares it as a zip on Google Drive; the launcher downloads the kit he posted last and installs it only if its SHA-256 matches. **ROE-LIVE by general_rj45**: the original server from GitHub, Training on Dione, with your own player name. Each server has its own folder and its own match options, so switching never mixes them. |
+| **Servers** | Two community servers, chosen on the Updates page and named next to PLAY. **RoE-Rivival by livegaming2042** (the default): bots that fight back, armour, killfeed, vehicles, and Dione, Europa and Vera in every mode (Play, Training, Customs). He shares it as a zip in his Google Drive folder; the launcher installs the newest kit there and logs its SHA-256. **ROE-LIVE by general_rj45**: the original server from GitHub, Training on Dione, with your own player name. **ROE-LIVE fork by \|NLG\|Kowalski**: ROE-LIVE plus his multiplayer work (a shared room for several PCs with player-versus-player damage). Each server has its own folder and its own match options, so switching never mixes them. |
 | **Play** | One button: prepares the server, starts it, waits until its ports are up, then starts the game. When the game closes, the server it started is stopped again. You can also run the server on its own. |
 | **Server Settings** | Every match option the installed server offers, read from the server itself and grouped (Match, Targets & bots, Map & world, Vehicles, Network). New upstream options show up after an update without a launcher release. Includes **practice targets** (up to 10 targets on the map) and live control. Clear error messages when the server refuses a combination. |
 | **Tencent crash reporter** | Game page: optionally **block TQMCenter**, the game's own crash and telemetry collector that can report to Tencent. No game file is changed; untick to allow it again. See [PRIVACY.md](PRIVACY.md). |
@@ -297,6 +297,8 @@ launcher forwards TCP 28001 → 8001 and 29001 → 19001 (private addresses only
 
 * **livegaming2042** ([RoE-Rivival](https://github.com/rapster2042/RoE-Rivival)) for his server with bots, armour,
   vehicles and three maps, shared freely with the community as kits on Discord.
+* **|NLG|Kowalski** ([his fork](https://github.com/streamnestapp/ring-of-elysium-local)) for his multiplayer work:
+  the shared room, player-versus-player damage and what other players see.
 * **general_rj45 and [ROE-LIVE](https://github.com/ROE-LIVE/ring-of-elysium-local)** for the community local server
   the launcher was built on, and its profiles, LAN tunnel and translations.
 * **awpstar** ([MLVP](https://github.com/MLVP)) and the four people working with them on

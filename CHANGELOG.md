@@ -3,6 +3,16 @@
 All notable changes to roe-launcher. Full release notes and downloads:
 <https://github.com/darknetcs/roe-launcher/releases>.
 
+## v0.1.13-test.3 — 2026-10-30 (pre-release)
+
+* **RoE-Rivival kits now come from livegaming2042's Google Drive folder**: when he uploads a new kit, launchers
+  install it on their next update check, without a launcher release. The Updates page links to his folder.
+* **A third server: ROE-LIVE fork by |NLG|Kowalski**, from GitHub. His work on real multiplayer: a shared room for
+  several PCs (Match options → Shared room, together with "Let others on my network join") with player-versus-player
+  damage (Shared PvP), and other players seeing you swim, glide and aim. Your own player name works with it.
+* **Time of day** (Server Settings → Map): morning 07:00 or 08:00, afternoon 15:00 or 16:00, the four start times
+  the servers offer.
+
 ## v0.1.13-test.2 — 2026-10-29 (pre-release)
 
 * **RoE-Rivival match switches** (Server Settings → Match), the ones of livegaming2042's own launcher: **bots**

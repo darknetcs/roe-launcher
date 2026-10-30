@@ -41,20 +41,32 @@ pub struct Source {
     /// announced (a file in the launcher's own repository, updated when the author posts a new kit).
     pub kit: Option<Kit>,
     pub kit_manifest: Option<&'static str>,
+    /// A public Google Drive folder where the author puts each new kit (`RoE-kit*.zip`); the newest one is used.
+    pub kit_folder: Option<&'static str>,
+    /// Where people can see the server: its repository, or the author's folder.
+    pub page: &'static str,
     /// Server Settings shows its own launcher's match switches (`switches`).
     pub switches: bool,
 }
 
 /// A server zip on a file host. `sha256` is checked after the download, so a changed file is never installed.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 pub struct KitInfo {
     pub url: String,
+    /// Empty when not known before the download (a kit from the author's folder).
+    #[serde(default)]
     pub sha256: String,
     /// What it is, in words ("Kit of 2026-10-29: lz4 fix").
     pub label: String,
     /// When its author posted it (shown as the date).
     #[serde(default)]
     pub posted: String,
+    /// Tells this kit apart when there is no `sha256` (folder kits: file id and upload time).
+    #[serde(default)]
+    pub version: String,
+    /// Manifest only: use this kit even when the author's folder has a newer one (to hold back a broken kit).
+    #[serde(default)]
+    pub pin: bool,
 }
 
 /// The kit compiled into the launcher (`KitInfo` with static text).
@@ -68,7 +80,7 @@ pub struct Kit {
 
 impl Kit {
     pub fn info(&self) -> KitInfo {
-        KitInfo { url: self.url.into(), sha256: self.sha256.into(), label: self.label.into(), posted: self.posted.into() }
+        KitInfo { url: self.url.into(), sha256: self.sha256.into(), label: self.label.into(), posted: self.posted.into(), ..Default::default() }
     }
 }
 
@@ -98,6 +110,8 @@ pub const ROE_LIVE: Source = Source {
     fixes: &[],
     kit: None,
     kit_manifest: None,
+    kit_folder: None,
+    page: "https://github.com/ROE-LIVE/ring-of-elysium-local",
     switches: false,
 };
 
@@ -110,7 +124,7 @@ pub const ROE_RIVIVAL: Source = Source {
     names_and_map: false,
     skip: &["RoE-kit.zip"],
     about: "livegaming2042's server, built on ROE-LIVE: bots that fight, armour, killfeed, vehicles, and Dione, Europa \
-            and Vera in every mode. Shared as a zip on Google Drive; the launcher fetches the kit he posted last. Its own \
+            and Vera in every mode. Shared as a zip in his Google Drive folder; the launcher fetches the newest kit there. Its own \
             lobby keeps the original player name. Its two-client duo mode is not offered.",
     maps: &crate::maps::RIVIVAL_MAPS,
     map_option: Some("--map"),
@@ -137,14 +151,41 @@ pub const ROE_RIVIVAL: Source = Source {
         posted: "2026-10-29",
     }),
     kit_manifest: Some("https://raw.githubusercontent.com/darknetcs/roe-launcher/main/sources/roe-rivival.json"),
+    // shared by livegaming2042 on 2026-10-29 for new kits (he can't commit to GitHub reliably)
+    kit_folder: Some("1cNJ0osudbt5VrQLhQFCvNvaV25eR96jR"),
+    page: "https://drive.google.com/drive/folders/1cNJ0osudbt5VrQLhQFCvNvaV25eR96jR",
     switches: true,
+};
+
+pub const KOWALSKI: Source = Source {
+    id: "kowalski",
+    name: "ROE-LIVE fork by |NLG|Kowalski",
+    repo: "streamnestapp/ring-of-elysium-local",
+    // his work is on the default branch; his main is still ROE-LIVE's (2026-10-30)
+    branch: "mapas-locais",
+    folder: "server-kowalski",
+    names_and_map: true,
+    skip: &[],
+    about: "|NLG|Kowalski's fork of ROE-LIVE, from GitHub: work on real multiplayer — a shared room for several PCs \
+            (Match options → Shared room, with your LAN host) with player-versus-player damage (Shared PvP), others see \
+            you swim, glide and aim, airdrops and drowning. Training on Dione, your own player name.",
+    maps: &crate::maps::MAPS,
+    map_option: None,
+    default_options: ROE_LIVE.default_options,
+    auto_loot_catalog: true,
+    fixes: &[],
+    kit: None,
+    kit_manifest: None,
+    kit_folder: None,
+    page: "https://github.com/streamnestapp/ring-of-elysium-local",
+    switches: false,
 };
 
 /// The server a new player starts with (owner's choice, 2026-10-29).
 pub const DEFAULT: Source = ROE_RIVIVAL;
 
 /// In the order the launcher offers them.
-pub const SOURCES: [Source; 2] = [ROE_RIVIVAL, ROE_LIVE];
+pub const SOURCES: [Source; 3] = [ROE_RIVIVAL, ROE_LIVE, KOWALSKI];
 
 /// The source saved as `id`; the default for anything unknown.
 pub fn source(id: &str) -> Source {
@@ -247,20 +288,97 @@ pub fn remote_head(src: &Source) -> Result<Remote> {
     bail!("could not reach GitHub ({})", errs.join("; "))
 }
 
-/// The kit `src` should run: the one its manifest announces, or the one compiled in when that can't be read.
-/// None = not a kit source.
+/// The kit `src` should run, first that can be read: a kit pinned in its manifest, the newest kit in its author's
+/// folder, the manifest's kit, the one compiled in. None = not a kit source.
 pub fn current_kit(src: &Source) -> Option<KitInfo> {
     let built_in = src.kit?.info();
     let announced = src.kit_manifest.and_then(|url| {
         let v: KitInfo = serde_json::from_str(&get_text(url).ok()?).ok()?;
         (v.sha256.len() == 64 && v.sha256.chars().all(|c| c.is_ascii_hexdigit()) && v.url.starts_with("https://")).then_some(v)
     });
-    Some(announced.unwrap_or(built_in))
+    if let Some(pinned) = announced.clone().filter(|k| k.pin) {
+        return Some(pinned);
+    }
+    Some(src.kit_folder.and_then(|f| folder_kit(f).ok()).or(announced).unwrap_or(built_in))
 }
 
-/// A kit's "commit": `kit-` and the start of its SHA-256 (the same for a local copy of the same zip).
+/// A kit's "commit": `kit-` and the start of its SHA-256 (the same for a local copy of the same zip), or for a
+/// folder kit its file id and upload time.
 pub fn kit_remote(kit: &KitInfo) -> Remote {
-    Remote { sha: format!("kit-{}", &kit.sha256.to_lowercase()[..24]), message: kit.label.clone(), date: kit.posted.clone() }
+    let id = if kit.sha256.len() >= 24 { kit.sha256.to_lowercase()[..24].to_string() } else { kit.version.clone() };
+    Remote { sha: format!("kit-{id}"), message: kit.label.clone(), date: kit.posted.clone() }
+}
+
+/// (file id, name) of each file in a public folder's `embeddedfolderview` page.
+pub fn folder_entries(page: &str) -> Vec<(String, String)> {
+    page.split("<div class=\"flip-entry\" id=\"entry-")
+        .skip(1)
+        .filter_map(|e| {
+            let id = e.split('"').next()?.to_string();
+            let name = between(e, "<div class=\"flip-entry-title\">", "</div>")?;
+            Some((id, unescape_xml(name)))
+        })
+        .collect()
+}
+
+/// The newest `RoE-kit*.zip` in a public Google Drive folder. The folder page shows only relative dates, so each
+/// candidate's upload time comes from its download's `Last-Modified`.
+pub fn folder_kit(folder: &str) -> Result<KitInfo> {
+    let page = get_text(&format!("https://drive.google.com/embeddedfolderview?id={folder}"))?;
+    let mut best: Option<(u64, String, String)> = None;
+    for (id, name) in folder_entries(&page) {
+        let lower = name.to_lowercase();
+        if !(lower.starts_with("roe-kit") && lower.ends_with(".zip")) {
+            continue;
+        }
+        let url = drive_download_url(&id);
+        let Ok(resp) = agent(20).head(&url).call() else { continue };
+        let Some(when) = resp.header("last-modified").and_then(http_date) else { continue };
+        if best.as_ref().map_or(true, |b| when > b.0) {
+            best = Some((when, id, name));
+        }
+    }
+    let (when, id, name) = best.ok_or_else(|| anyhow!("no RoE-kit zip in the folder"))?;
+    let (date, time) = ymd_hm(when);
+    Ok(KitInfo {
+        url: drive_download_url(&id),
+        sha256: String::new(),
+        label: format!("{name} uploaded {date} {time} UTC"),
+        posted: date,
+        version: format!("{}-{when}", &id[..id.len().min(8)]),
+        pin: false,
+    })
+}
+
+fn drive_download_url(id: &str) -> String {
+    format!("https://drive.usercontent.google.com/download?id={id}&export=download&confirm=t")
+}
+
+/// Seconds since 1970 of an HTTP date ("Thu, 29 Oct 2026 17:56:07 GMT").
+pub fn http_date(s: &str) -> Option<u64> {
+    let p: Vec<&str> = s.split_whitespace().collect();
+    let (day, year): (i64, i64) = (p.get(1)?.parse().ok()?, p.get(3)?.parse().ok()?);
+    let name = *p.get(2)?;
+    let month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].iter().position(|m| *m == name)? as i64 + 1;
+    let hms: Vec<i64> = p.get(4)?.split(':').map(|x| x.parse().ok()).collect::<Option<_>>()?;
+    let (y, m) = if month <= 2 { (year - 1, month + 9) } else { (year, month - 3) };
+    let days = 365 * y + y / 4 - y / 100 + y / 400 + (153 * m + 2) / 5 + day - 1 - 719468;
+    u64::try_from(days * 86400 + hms.first()? * 3600 + hms.get(1)? * 60 + hms.get(2)?).ok()
+}
+
+/// ("2026-10-29", "17:56") of seconds since 1970, UTC.
+fn ymd_hm(secs: u64) -> (String, String) {
+    let days = (secs / 86400) as i64 + 719468;
+    let era = days.div_euclid(146097);
+    let doe = days - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    let t = secs % 86400;
+    (format!("{y:04}-{m:02}-{d:02}"), format!("{:02}:{:02}", t / 3600, t % 3600 / 60))
 }
 
 /// Downloads `kit` to `dest` and checks its SHA-256. Google Drive answers a large file with a "can't scan it for
@@ -296,6 +414,11 @@ pub fn download_kit(kit: &KitInfo, dest: &Path, sink: &Sink) -> Result<()> {
     }
     drop(out);
     let have = crate::runtime::sha256_hex(dest)?;
+    if kit.sha256.is_empty() {
+        // a folder kit: nothing announced to compare with; unpacking still refuses anything that isn't a server
+        sink(format!("Kit downloaded, SHA-256 {have}."));
+        return Ok(());
+    }
     if !have.eq_ignore_ascii_case(&kit.sha256) {
         let _ = fs::remove_file(dest);
         bail!("the downloaded kit is not the one announced (SHA-256 {have}): its author may have replaced the file; try again later");
@@ -785,6 +908,31 @@ mod tests {
         let parsed: KitInfo = serde_json::from_str(include_str!("../../../sources/roe-rivival.json")).unwrap();
         assert!(parsed.url.starts_with("https://") && parsed.sha256.len() == 64, "the published manifest parses");
         assert!(ROE_LIVE.kit.is_none() && current_kit(&ROE_LIVE).is_none());
+        assert!(!parsed.pin, "the published manifest doesn't hold back the author's folder");
+    }
+
+    #[test]
+    fn reads_the_authors_drive_folder() {
+        let page = r#"<div class="flip-entries"><div class="flip-entry" id="entry-1Yfd5hp-ZSJln9dGMy2dqEc7QGHT22eTs" tabindex="0" role="link"><div class="flip-entry-info"><a href="https://drive.google.com/file/d/1Yfd5hp-ZSJln9dGMy2dqEc7QGHT22eTs/view?usp=drive_web" target="_blank"><div class="flip-entry-title">RoE-kit.zip</div></a></div><div class="flip-entry-last-modified"><div>10:56 am</div></div></div><div class="flip-entry" id="entry-abc"><div class="flip-entry-title">notes &amp; readme.txt</div></div></div>"#;
+        assert_eq!(
+            folder_entries(page),
+            [("1Yfd5hp-ZSJln9dGMy2dqEc7QGHT22eTs".to_string(), "RoE-kit.zip".to_string()), ("abc".to_string(), "notes & readme.txt".to_string())]
+        );
+        let t = http_date("Thu, 29 Oct 2026 17:56:07 GMT").unwrap();
+        assert_eq!(ymd_hm(t), ("2026-10-29".to_string(), "17:56".to_string()));
+        assert_eq!(http_date("Thu, 01 Jan 1970 00:00:00 GMT"), Some(0));
+        assert!(http_date("Feb 29 2026 nonsense").is_none());
+        // a folder kit has no hash: its file id and upload time tell it apart
+        let k = KitInfo { version: "1Yfd5hp--1793296567".into(), ..Default::default() };
+        assert_eq!(kit_remote(&k).sha, "kit-1Yfd5hp--1793296567");
+    }
+
+    #[test]
+    #[ignore = "reads livegaming2042's Google Drive folder"]
+    fn live_folder_has_a_kit() {
+        let k = folder_kit(ROE_RIVIVAL.kit_folder.unwrap()).unwrap();
+        println!("{k:?}");
+        assert!(k.url.contains("drive.usercontent.google.com") && k.version.contains('-') && k.posted.len() == 10);
     }
 
     #[test]
@@ -815,9 +963,10 @@ mod tests {
         assert_eq!(source("nope"), ROE_RIVIVAL);
         assert_eq!(source(""), DEFAULT);
         let ids: Vec<_> = SOURCES.iter().map(|s| s.id).collect();
-        assert_eq!(ids, ["roe-rivival", "roe-live"]);
+        assert_eq!(ids, ["roe-rivival", "roe-live", "kowalski"]);
         // people tell the servers apart by their authors
         assert!(ROE_RIVIVAL.name.ends_with("by livegaming2042") && ROE_LIVE.name.ends_with("by general_rj45"));
+        assert!(KOWALSKI.name.ends_with("by |NLG|Kowalski") && KOWALSKI.kit.is_none() && KOWALSKI.names_and_map);
         let folders: std::collections::HashSet<_> = SOURCES.iter().map(|s| s.folder).collect();
         assert_eq!(folders.len(), SOURCES.len(), "each source needs its own folder");
     }
