@@ -3,7 +3,9 @@
 All notable changes to roe-launcher. Full release notes and downloads:
 <https://github.com/darknetcs/roe-launcher/releases>.
 
-## v0.1.13-test.3 — 2026-10-30 (pre-release)
+## v0.1.13-test.3 "Three Musketeers" — 2026-10-30 (pre-release)
+
+Three servers from three developers in one launcher: livegaming2042, general_rj45 and |NLG|Kowalski.
 
 * **RoE-Rivival kits now come from livegaming2042's Google Drive folder**: when he uploads a new kit, launchers
   install it on their next update check, without a launcher release. The Updates page links to his folder.
