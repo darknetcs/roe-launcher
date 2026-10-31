@@ -235,6 +235,46 @@ network ports.
 source, and it carries version details (publisher, description) under *Properties → Details*. If an engine flags the
 genuine file, please let us know; we report false positives to the vendors.
 
+## Windows: setting up Python and .NET by hand
+
+On the first start the launcher downloads a portable Python, pip and the .NET 8 SDK into the server folder. Some
+antivirus "web shields", proxies or networks hold these downloads, and the launcher then stays on *Working… /
+Preparing Python and .NET…* (in `.tools\downloads` you see a `.part` file that stays at 0 KB). You can do those steps
+yourself; the launcher skips every step that is already done.
+
+**First:** close the launcher (check Task Manager for leftover `roe-launcher.exe` and `python.exe`) and delete the
+`.part` file. Allowing `roe-launcher.exe` in your antivirus' web/HTTPS protection often fixes it already.
+
+The server folder is `%LOCALAPPDATA%\roe-local\server` (paste it into Explorer's address bar), unless you chose
+another one in the launcher. Test builds use one folder per server: `server` (ROE-LIVE), `server-roe-rivival`,
+`server-kowalski`. Below, `.tools` means the `.tools` folder inside it; create it if it doesn't exist.
+
+| Step | Download | Put it here |
+|---|---|---|
+| 1. Python 3.12 | [python-3.12.10-embed-amd64.zip](https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip) (11 MB) | Unzip into `.tools\python\` so that `.tools\python\python.exe` exists (not `.tools\python\python-3.12.10-embed-amd64\python.exe`). |
+| 2. pip | [get-pip.py](https://bootstrap.pypa.io/get-pip.py) (save the page with *Save as*) | Only if the launcher hangs on *Setting up pip…*: see below. |
+| 3. Python packages | — (pip fetches them from PyPI) | Nothing to do; the launcher shows pip's progress and errors in Recent activity. |
+| 4. .NET 8 SDK | [dotnet-sdk-win-x64.zip](https://aka.ms/dotnet/8.0/dotnet-sdk-win-x64.zip) (about 280 MB) | Unzip into `.tools\dotnet\` so that `.tools\dotnet\dotnet.exe` exists. The .NET installer (.exe) does **not** help: the launcher uses only this folder. |
+
+After each step press **PLAY** again; the launcher continues with the next one.
+
+For step 1, the zip's SHA-256 should be `4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3`
+(PowerShell: `Get-FileHash python-3.12.10-embed-amd64.zip`).
+
+For step 2, first do step 1 and press **PLAY** once (the launcher then configures the portable Python; it may hang on *Setting up pip…* again),
+close it, and
+run this in a Command Prompt from the server folder, with the path where you saved `get-pip.py`:
+
+```bat
+.tools\python\python.exe "%USERPROFILE%\Downloads\get-pip.py" --no-warn-script-location
+```
+
+If PyPI itself is blocked in step 3, run from the server folder:
+`.tools\python\python.exe -m pip install --only-binary=:all: -r requirements.txt` and look at its error.
+
+Still stuck? Open an [issue](https://github.com/darknetcs/roe-launcher/issues) with your `launcher.log`
+(`%LOCALAPPDATA%\roe-local\launcher.log`).
+
 ## Known limitations
 
 * **Only Training is implemented** by the community server; other game modes don't exist yet.
